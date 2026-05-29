@@ -1,12 +1,16 @@
-// lib/screens/vehicle_detail_screen.dart
+import 'dart:math' as math;
+// lib/screens/vehicle_detail_screen.dart — v3
+// Tabbed screen: Dashboard | Trips | Alerts | Reports | Sensor | Commands
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart';
 import '../services/app_state.dart';
 import '../models/traccar_models.dart';
 import '../utils/theme.dart';
-import '../widgets/shared_widgets.dart';
 import 'history_screen.dart';
-import 'sensors_screen.dart';
 import 'live_tracking_screen.dart';
 
 class VehicleDetailScreen extends StatefulWidget {
@@ -15,419 +19,1073 @@ class VehicleDetailScreen extends StatefulWidget {
   @override State<VehicleDetailScreen> createState() => _VehicleDetailScreenState();
 }
 
-class _VehicleDetailScreenState extends State<VehicleDetailScreen>
-    with SingleTickerProviderStateMixin {
-  late TabController _tab;
-  @override void initState() { super.initState(); _tab = TabController(length: 4, vsync: this); }
-  @override void dispose()   { _tab.dispose(); super.dispose(); }
+class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
+  int _tab = 0;
+  Timer? _pollTimer;
 
-  @override
-  Widget build(BuildContext context) {
-    final state  = context.watch<AppState>();
-    final pos    = state.posFor(widget.device.id);
-    final status = state.statusFor(widget.device);
-    final col    = AC.forStatus(status);
-
-    return Scaffold(
-      backgroundColor: AC.bg,
-      appBar: AppBar(
-        backgroundColor: AC.surface,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 18),
-          onPressed: () => Navigator.pop(context)),
-        title: Text(widget.device.name, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w900)),
-        bottom: TabBar(
-          controller: _tab,
-          indicatorColor: AC.blue,
-          indicatorWeight: 3,
-          labelColor: AC.blue,
-          unselectedLabelColor: AC.text3,
-          labelStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
-          tabs: const [
-            Tab(text: 'Dashboard'), Tab(text: 'Trips'),
-            Tab(text: 'Alerts'),    Tab(text: 'Reports'),
-          ],
-        ),
-      ),
-      body: TabBarView(controller: _tab, children: [
-        _DashTab(device: widget.device, pos: pos, status: status, col: col),
-        HistoryScreen(device: widget.device, embedded: true),
-        _AlertsTab(device: widget.device),
-        _ReportsTab(device: widget.device),
-      ]),
-    );
-  }
-}
-
-// ── Dashboard Tab ─────────────────────────────────────────────────────────────
-class _DashTab extends StatefulWidget {
-  final TraccarDevice device;
-  final TraccarPosition? pos;
-  final DeviceStatus status;
-  final Color col;
-  const _DashTab({required this.device, required this.pos, required this.status, required this.col});
-
-  @override
-  State<_DashTab> createState() => _DashTabState();
-}
-
-class _DashTabState extends State<_DashTab> {
-  double? _todayDist;
+  static const _tabs = ['Dashboard', 'Trips', 'Alerts', 'Reports', 'Sensor', 'Commands'];
 
   @override
   void initState() {
     super.initState();
-    _fetchDist();
-  }
-
-  void _fetchDist() async {
-    final svc = context.read<AppState>().svc;
-    if (svc != null) {
-      final d = await svc.getDailyDistance(deviceId: widget.device.id);
-      if (mounted) setState(() => _todayDist = d);
-    }
+    _pollTimer = Timer.periodic(const Duration(seconds: 15), (_) {
+      if (mounted) context.read<AppState>().refresh();
+    });
   }
 
   @override
-  Widget build(BuildContext context) {
-    final spd  = widget.pos?.speedKmh ?? 0.0;
+  void dispose() { _pollTimer?.cancel(); super.dispose(); }
 
-    return ListView(padding: const EdgeInsets.fromLTRB(16, 16, 16, 24), children: [
+  @override
+  Widget build(BuildContext context) {
+    final state = context.watch<AppState>();
+    final pos   = state.posFor(widget.device.id);
+    final st    = state.statusFor(widget.device);
+
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      body: SafeArea(child: Column(children: [
+        // Header
+        Container(
+          color: AppColors.surface,
+          child: Column(children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+              child: Row(children: [
+                GestureDetector(
+                  onTap: () => Navigator.pop(context),
+                  child: const Icon(Icons.arrow_back_rounded, size: 22, color: AppColors.text1)),
+                const SizedBox(width: 12),
+                Text(widget.device.name,
+                  style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: AppColors.text1)),
+                const Spacer(),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: AppColors.bgForStatus(st),
+                    borderRadius: BorderRadius.circular(20)),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Container(width: 6, height: 6, margin: const EdgeInsets.only(left: 6),
+                      decoration: BoxDecoration(color: AppColors.forStatus(st), shape: BoxShape.circle)),
+                    const SizedBox(width: 4),
+                    Text(statusLabel(st).toUpperCase(),
+                      style: TextStyle(fontSize: 9, fontWeight: FontWeight.w800,
+                        color: AppColors.forStatus(st), letterSpacing: 0.5)),
+                    const SizedBox(width: 6),
+                  ]),
+                ),
+              ]),
+            ),
+            const SizedBox(height: 12),
+            // Scrollable tabs
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+              child: Row(children: List.generate(_tabs.length, (i) {
+                final sel = _tab == i;
+                return GestureDetector(
+                  onTap: () => setState(() => _tab = i),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 150),
+                    margin: const EdgeInsets.only(right: 8),
+                    padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 9),
+                    decoration: BoxDecoration(
+                      color: sel ? AppColors.primary : AppColors.background,
+                      borderRadius: BorderRadius.circular(24),
+                    ),
+                    child: Text(_tabs[i], style: TextStyle(
+                      fontSize: 13, fontWeight: FontWeight.w700,
+                      color: sel ? Colors.white : AppColors.text3)),
+                  ),
+                );
+              })),
+            ),
+          ]),
+        ),
+
+        // Body
+        Expanded(child: IndexedStack(index: _tab, children: [
+          _VehicleDashTab(device: widget.device),
+          _TripsTab(device: widget.device),
+          _VehicleAlertsTab(device: widget.device),
+          _ReportsTab(device: widget.device),
+          _SensorTab(device: widget.device),
+          _CommandsTab(device: widget.device),
+        ])),
+      ])),
+    );
+  }
+}
+
+// ══════════════════ TAB 0: DASHBOARD ══════════════════════════════════════
+class _VehicleDashTab extends StatelessWidget {
+  final TraccarDevice device;
+  const _VehicleDashTab({required this.device});
+
+  @override
+  Widget build(BuildContext context) {
+    final state = context.watch<AppState>();
+    final pos   = state.posFor(device.id);
+    final st    = state.statusFor(device);
+    final spd   = pos?.speedKmh ?? 0.0;
+    final dist  = (pos?.totalDistance ?? 0) / 1000;
+
+    return ListView(padding: const EdgeInsets.all(16), children: [
       // Live Telemetry card
       Container(
         padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(color: AC.surface, borderRadius: BorderRadius.circular(20)),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 3))],
+        ),
         child: Column(children: [
-          const Text('Live Telemetry', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: AC.text3)),
+          const Text('Live Telemetry', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.text1)),
           const SizedBox(height: 16),
-          SpeedBar(speedKmh: spd),
-          const SizedBox(height: 20),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton.icon(
-              onPressed: () => Navigator.push(context, MaterialPageRoute(
-                builder: (_) => LiveTrackingScreen(device: widget.device))),
-              icon: const Icon(Icons.navigation_rounded, size: 18),
-              label: const Text('Live Track Vehicle'),
-              style: ElevatedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)))),
-          ),
+          // Speedometer arc
+          _SpeedArc(speed: spd),
+          const SizedBox(height: 14),
+          // Live Track button
+          SizedBox(width: double.infinity, child: ElevatedButton.icon(
+            onPressed: () => Navigator.push(context,
+              MaterialPageRoute(builder: (_) => LiveTrackingScreen(device: device))),
+            icon: const Icon(Icons.navigation_rounded, size: 16),
+            label: const Text('Live Track Vehicle'),
+            style: ElevatedButton.styleFrom(
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            ),
+          )),
           const SizedBox(height: 12),
-          Text(_todayDist != null ? "Today's Distance: ${_todayDist!.toStringAsFixed(1)} km" : "Today's Distance: Loading...",
-            style: const TextStyle(fontSize: 13, color: AC.text3)),
+          Text("Today's Distance: ${dist.toStringAsFixed(1)} km",
+            style: const TextStyle(fontSize: 13, color: AppColors.text3)),
         ]),
       ),
-      const SizedBox(height: 12),
+      const SizedBox(height: 14),
 
       // Status card
       Container(
         padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(color: AC.surface, borderRadius: BorderRadius.circular(16)),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10)],
+        ),
         child: Column(children: [
-          _Row('Status', statusLabel(widget.status), valueColor: widget.col),
-          const Divider(color: AC.surface2, height: 16),
-          _Row('Vehicle', widget.device.model ?? widget.device.uniqueId),
-          const Divider(color: AC.surface2, height: 16),
-          if (widget.pos != null) InkWell(
-            onTap: () {},
-            child: Row(children: [
-              const Icon(Icons.location_on_rounded, color: AC.blue, size: 16),
-              const SizedBox(width: 8),
-              const Text('Last Known Location', style: TextStyle(color: AC.blue, fontWeight: FontWeight.w600, fontSize: 13)),
-              const Spacer(),
-              Text(widget.pos!.address ?? '${widget.pos!.latitude.toStringAsFixed(6)}, ${widget.pos!.longitude.toStringAsFixed(6)}',
-                style: const TextStyle(fontSize: 12, color: AC.text3), overflow: TextOverflow.ellipsis),
-              const SizedBox(width: 4),
-              const Icon(Icons.open_in_new_rounded, color: AC.blue, size: 14),
-            ]),
-          ),
+          _DetailRow('Status', statusLabel(st), valueColor: AppColors.forStatus(st), bold: true),
+          const Divider(height: 16, color: AppColors.divider),
+          _DetailRow('Vehicle', device.model ?? device.name),
+          if (pos != null) ...[
+            const Divider(height: 16, color: AppColors.divider),
+            // Location tile
+            GestureDetector(
+              onTap: () => _openMaps(pos.latitude, pos.longitude),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                decoration: BoxDecoration(
+                  color: AppColors.primary.withOpacity(0.06),
+                  borderRadius: BorderRadius.circular(12)),
+                child: Row(children: [
+                  const Icon(Icons.location_on_rounded, size: 16, color: AppColors.primary),
+                  const SizedBox(width: 8),
+                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    const Text('Last Known Location', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.primary)),
+                    Text('${pos.latitude.toStringAsFixed(6)}, ${pos.longitude.toStringAsFixed(6)}',
+                      style: const TextStyle(fontSize: 11, color: AppColors.primary)),
+                  ])),
+                  const Icon(Icons.open_in_new_rounded, size: 14, color: AppColors.primary),
+                ]),
+              ),
+            ),
+          ],
         ]),
       ),
-      const SizedBox(height: 12),
-
-      // Sensor chips
-      if (widget.pos != null) ...[
-        const Text("Today's Stats", style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: AC.text1)),
-        const SizedBox(height: 10),
-        GridView.count(
-          crossAxisCount: 3, shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          crossAxisSpacing: 8, mainAxisSpacing: 8, childAspectRatio: 1.4,
-          children: [
-            InfoTile(label: 'Dist', value: _todayDist != null ? '${_todayDist!.toStringAsFixed(1)}km' : '—'),
-            InfoTile(label: 'Max', value: '${widget.pos!.attributes['maxSpeed'] != null ? ((widget.pos!.attributes['maxSpeed'] as num) * 3.6).round() : 0} km/h'),
-            const InfoTile(label: 'Avg', value: '—'),
-            if (widget.pos!.fuel != null) InfoTile(label: 'Fuel', value: '${widget.pos!.fuel!.round()}%',
-              valueColor: widget.pos!.fuel! < 25 ? AC.red : widget.pos!.fuel! < 50 ? AC.orange : AC.green),
-            if (widget.pos!.batteryLevel != null) InfoTile(label: 'Battery', value: '${widget.pos!.batteryLevel!.round()}%'),
-            if (widget.pos!.satellites != null) InfoTile(label: 'GPS Sats', value: '${widget.pos!.satellites}'),
-          ],
-        ),
-        const SizedBox(height: 12),
-
-        // Sensor chips row
-        Wrap(spacing: 6, runSpacing: 6, children: [
-          SChip(icon: Icons.power_settings_new_rounded,
-            label: widget.pos!.ignition == true ? 'Ignition ON' : 'Ignition OFF',
-            color: widget.pos!.ignition == true ? AC.green : AC.text3),
-          SChip(icon: Icons.electric_bolt_rounded,
-            label: widget.pos!.charging == true ? 'Charging' : 'Not Charging',
-            color: widget.pos!.charging == true ? AC.green : AC.text3),
-          SChip(icon: Icons.shield_rounded,
-            label: widget.pos!.blocked == true ? 'Immobilized' : 'Active',
-            color: widget.pos!.blocked == true ? AC.red : AC.text3),
-          if (widget.pos!.rssi != null) SChip(icon: Icons.signal_cellular_alt_rounded, label: '${widget.pos!.rssi}% Signal'),
-          if (widget.pos!.satellites != null) SChip(icon: Icons.satellite_alt_rounded, label: '${widget.pos!.satellites} Sats'),
-        ]),
-        const SizedBox(height: 16),
-      ],
-
-      // Action buttons
-      Row(children: [
-        Expanded(child: _ActionBtn(Icons.sensors_rounded, 'Sensors', AC.purple, () =>
-          Navigator.push(context, MaterialPageRoute(builder: (_) => SensorsScreen(device: widget.device))))),
-        const SizedBox(width: 10),
-        Expanded(child: _ActionBtn(Icons.shield_rounded, 'Immobilizer',
-          widget.pos?.blocked == true ? AC.green : AC.red,
-          () => _sendCommand(context, widget.pos?.blocked == true ? 'engineResume' : 'engineStop'))),
-        const SizedBox(width: 10),
-        Expanded(child: _ActionBtn(Icons.location_searching_rounded, 'Get Location', AC.blue,
-          () => _sendCommand(context, 'positionSingle'))),
-      ]),
     ]);
   }
 
-  void _sendCommand(BuildContext ctx, String type) async {
-    final state = ctx.read<AppState>();
+  void _openMaps(double lat, double lon) {
+    // would launch url_launcher in real app
+  }
+}
+
+// ══════════════════ TAB 1: TRIPS ══════════════════════════════════════════
+class _TripsTab extends StatefulWidget {
+  final TraccarDevice device;
+  const _TripsTab({required this.device});
+  @override State<_TripsTab> createState() => _TripsTabState();
+}
+class _TripsTabState extends State<_TripsTab> {
+  DateTime _from = DateTime.now().subtract(const Duration(days: 7));
+  DateTime _to   = DateTime.now();
+  List<TraccarTrip> _trips = [];
+  bool _loading = false;
+
+  @override
+  void initState() { super.initState(); _load(); }
+
+  Future<void> _load() async {
+    setState(() { _loading = true; _trips = []; });
+    final svc = context.read<AppState>().service;
+    if (svc == null) { setState(() => _loading = false); return; }
     try {
-      await state.svc!.sendCommand(deviceId: widget.device.id, type: type);
-      if (ctx.mounted) {
-        ScaffoldMessenger.of(ctx).showSnackBar(
-        SnackBar(content: Text('Command "$type" sent'), backgroundColor: AC.green));
-      }
-    } catch (e) {
-      if (ctx.mounted) {
-        ScaffoldMessenger.of(ctx).showSnackBar(
-        SnackBar(content: Text('Failed: $e'), backgroundColor: AC.red));
-      }
+      final t = await svc.getTrips(deviceId: widget.device.id, from: _from,
+        to: DateTime(_to.year, _to.month, _to.day, 23, 59, 59));
+      if (mounted) setState(() => _trips = t);
+    } catch (_) {}
+    if (mounted) setState(() => _loading = false);
+  }
+
+  Future<void> _pickDate(bool isFrom) async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: isFrom ? _from : _to,
+      firstDate: DateTime.now().subtract(const Duration(days: 365)),
+      lastDate: DateTime.now(),
+      builder: (ctx, child) => Theme(
+        data: Theme.of(ctx).copyWith(colorScheme: const ColorScheme.light(primary: AppColors.primary)),
+        child: child!),
+    );
+    if (picked != null) {
+      setState(() { if (isFrom) _from = picked; else _to = picked; });
+      _load();
     }
   }
 
-  Widget _Row(String label, String value, {Color? valueColor}) => Row(children: [
-    Text(label, style: const TextStyle(fontSize: 13, color: AC.text3)),
-    const Spacer(),
-    Text(value, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: valueColor ?? AC.text1)),
+  @override
+  Widget build(BuildContext context) {
+    final totalDist = _trips.fold(0.0, (s, t) => s + t.distance);
+    final totalDur  = _trips.fold(0,   (s, t) => s + t.duration);
+
+    return ListView(padding: const EdgeInsets.all(16), children: [
+      // Date range selector
+      Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(18),
+          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 8)]),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text('QUICK SELECT', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: AppColors.text4, letterSpacing: 0.6)),
+          const SizedBox(height: 10),
+          SingleChildScrollView(scrollDirection: Axis.horizontal,
+            child: Row(children: [
+              _QuickBtn('Today', () { setState(() { _from = DateTime.now(); _to = DateTime.now(); }); _load(); }),
+              _QuickBtn('Yesterday', () { final y = DateTime.now().subtract(const Duration(days: 1)); setState(() { _from = y; _to = y; }); _load(); }),
+              _QuickBtn('This Week', () { final now = DateTime.now(); setState(() { _from = now.subtract(Duration(days: now.weekday-1)); _to = now; }); _load(); }),
+              _QuickBtn('Last Week', () { final now = DateTime.now(); final start = now.subtract(Duration(days: now.weekday+6)); setState(() { _from = start; _to = start.add(const Duration(days: 6)); }); _load(); }),
+            ]),
+          ),
+          const SizedBox(height: 14),
+          Row(children: [
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Text('START DATE', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: AppColors.text4, letterSpacing: 0.6)),
+              const SizedBox(height: 6),
+              GestureDetector(
+                onTap: () => _pickDate(true),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  decoration: BoxDecoration(color: AppColors.background, borderRadius: BorderRadius.circular(12)),
+                  child: Row(children: [
+                    const Icon(Icons.calendar_month_rounded, size: 16, color: AppColors.primary),
+                    const SizedBox(width: 8),
+                    Text(fmtDateShort(_from), style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.text1)),
+                  ]),
+                ),
+              ),
+            ])),
+            const Padding(padding: EdgeInsets.fromLTRB(12, 16, 12, 0),
+              child: Icon(Icons.arrow_forward_rounded, color: AppColors.text4, size: 18)),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Text('END DATE', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: AppColors.text4, letterSpacing: 0.6)),
+              const SizedBox(height: 6),
+              GestureDetector(
+                onTap: () => _pickDate(false),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  decoration: BoxDecoration(color: AppColors.background, borderRadius: BorderRadius.circular(12)),
+                  child: Row(children: [
+                    const Icon(Icons.calendar_month_rounded, size: 16, color: AppColors.primary),
+                    const SizedBox(width: 8),
+                    Text(fmtDateShort(_to), style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.text1)),
+                  ]),
+                ),
+              ),
+            ])),
+          ]),
+        ]),
+      ),
+      const SizedBox(height: 14),
+
+      const Text('Trips History', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: AppColors.text1)),
+      const SizedBox(height: 10),
+
+      // Summary
+      if (_trips.isNotEmpty) Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 14),
+        decoration: BoxDecoration(
+          color: AppColors.primary.withOpacity(0.07),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppColors.primary.withOpacity(0.15)),
+        ),
+        child: Row(children: [
+          Expanded(child: _TripStat('Total Trips',    '${_trips.length}',               AppColors.primary)),
+          Container(width: 1, height: 36, color: AppColors.primary.withOpacity(0.2)),
+          Expanded(child: _TripStat('Total Distance', fmtKm(totalDist),                  AppColors.primary)),
+          Container(width: 1, height: 36, color: AppColors.primary.withOpacity(0.2)),
+          Expanded(child: _TripStat('Total Time',     fmtDuration(totalDur),             AppColors.primary)),
+        ]),
+      ),
+      const SizedBox(height: 10),
+
+      if (_loading) const Center(child: Padding(padding: EdgeInsets.all(32),
+        child: CircularProgressIndicator(color: AppColors.primary, strokeWidth: 2))),
+
+      ..._trips.map((t) => _TripCard(trip: t, onReplay: () {
+        Navigator.push(context, MaterialPageRoute(builder: (_) =>
+          HistoryScreen(device: widget.device, jumpToTrip: t)));
+      })),
+
+      if (!_loading && _trips.isEmpty) const Padding(padding: EdgeInsets.symmetric(vertical: 40),
+        child: Center(child: Text('No trips in this period', style: TextStyle(color: AppColors.text3)))),
+    ]);
+  }
+}
+
+class _TripCard extends StatelessWidget {
+  final TraccarTrip trip;
+  final VoidCallback onReplay;
+  const _TripCard({required this.trip, required this.onReplay});
+  @override
+  Widget build(BuildContext context) => Container(
+    margin: const EdgeInsets.only(bottom: 10),
+    padding: const EdgeInsets.all(16),
+    decoration: BoxDecoration(
+      color: AppColors.surface,
+      borderRadius: BorderRadius.circular(16),
+      boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8)]),
+    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Row(children: [
+        Container(width: 36, height: 36,
+          decoration: BoxDecoration(color: AppColors.primary.withOpacity(0.1), shape: BoxShape.circle),
+          child: const Icon(Icons.route_rounded, color: AppColors.primary, size: 18)),
+        const SizedBox(width: 12),
+        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(trip.startTime != null
+            ? '${trip.startTime!.month}/${trip.startTime!.day}/${trip.startTime!.year} ${fmtTimeOnly(trip.startTime)}'
+            : '—',
+            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.text1)),
+          Text('End: ${fmtTimeOnly(trip.endTime)}',
+            style: const TextStyle(fontSize: 12, color: AppColors.text3)),
+        ])),
+      ]),
+      const SizedBox(height: 12),
+      Row(children: [
+        _TripInfo('Distance', '${trip.distanceKm.toStringAsFixed(1)} km'),
+        const SizedBox(width: 16),
+        _TripInfo('Duration', trip.durationStr),
+        const SizedBox(width: 16),
+        _TripInfo('Max Spd',  '${trip.maxSpeedKmh.round()} km/h'),
+      ]),
+      const SizedBox(height: 12),
+      SizedBox(width: double.infinity, child: OutlinedButton.icon(
+        onPressed: onReplay,
+        icon: const Icon(Icons.play_circle_outline_rounded, size: 16),
+        label: const Text('Replay on Map'),
+        style: OutlinedButton.styleFrom(
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          foregroundColor: AppColors.primary,
+          side: const BorderSide(color: AppColors.primary),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        ),
+      )),
+    ]),
+  );
+}
+
+class _TripInfo extends StatelessWidget {
+  final String label, value;
+  const _TripInfo(this.label, this.value);
+  @override
+  Widget build(BuildContext context) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+    Text(label, style: const TextStyle(fontSize: 11, color: AppColors.text4)),
+    Text(value, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.text1)),
   ]);
 }
 
-class _ActionBtn extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final Color color;
-  final VoidCallback onTap;
-  const _ActionBtn(this.icon, this.label, this.color, this.onTap);
+class _TripStat extends StatelessWidget {
+  final String label, value; final Color color;
+  const _TripStat(this.label, this.value, this.color);
+  @override
+  Widget build(BuildContext context) => Column(children: [
+    Text(label, style: const TextStyle(fontSize: 10, color: AppColors.text3)),
+    const SizedBox(height: 4),
+    Text(value, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: color)),
+  ]);
+}
+
+class _QuickBtn extends StatelessWidget {
+  final String label; final VoidCallback onTap;
+  const _QuickBtn(this.label, this.onTap);
   @override
   Widget build(BuildContext context) => GestureDetector(
     onTap: onTap,
     child: Container(
-      padding: const EdgeInsets.symmetric(vertical: 12),
-      decoration: BoxDecoration(color: color.withOpacity(0.15), borderRadius: BorderRadius.circular(12)),
-      child: Column(children: [
-        Icon(icon, color: color, size: 22),
-        const SizedBox(height: 5),
-        Text(label, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: color), textAlign: TextAlign.center),
-      ]),
+      margin: const EdgeInsets.only(right: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+      decoration: BoxDecoration(color: AppColors.background, borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: AppColors.divider)),
+      child: Text(label, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.text2)),
     ),
   );
 }
 
-// ── Alerts Tab ────────────────────────────────────────────────────────────────
-class _AlertsTab extends StatelessWidget {
+// ══════════════════ TAB 2: VEHICLE ALERTS ═════════════════════════════════
+class _VehicleAlertsTab extends StatelessWidget {
   final TraccarDevice device;
-  const _AlertsTab({required this.device});
+  const _VehicleAlertsTab({required this.device});
   @override
   Widget build(BuildContext context) {
     final state  = context.watch<AppState>();
     final events = state.events.where((e) => e.deviceId == device.id).toList();
-    if (events.isEmpty) return const EmptyState(icon: Icons.notifications_none_rounded, message: 'No alerts for this vehicle');
-    return ListView.builder(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-      itemCount: events.length,
-      itemBuilder: (_, i) => _AlertCard(event: events[i]));
+    return Column(children: [
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+        child: Align(alignment: Alignment.centerLeft,
+          child: Text('Vehicle Alerts', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: AppColors.text1))),
+      ),
+      Expanded(child: events.isEmpty
+        ? const Center(child: Text('No alerts', style: TextStyle(color: AppColors.text3)))
+        : ListView.builder(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            itemCount: events.length,
+            itemBuilder: (_, i) => _AlertRow(event: events[i]),
+          )),
+    ]);
   }
 }
 
-class _AlertCard extends StatelessWidget {
+class _AlertRow extends StatelessWidget {
   final TraccarEvent event;
-  const _AlertCard({required this.event});
+  const _AlertRow({required this.event});
   @override
   Widget build(BuildContext context) {
-    final m   = eventMeta(event.type);
-    final col = Color(m['color'] as int);
-    final bg  = Color(m['bg']    as int);
+    final meta = eventMeta(event.type);
+    final col  = Color(meta['color'] as int);
+    final bg   = Color(meta['bg']    as int);
+    final label = meta['label'] as String;
+    final pos   = event.attributes['latitude'] != null
+      ? '${(event.attributes['latitude'] as num).toStringAsFixed(4)}, ${(event.attributes['longitude'] as num).toStringAsFixed(4)}'
+      : null;
+    final spd = event.attributes['speed'] != null
+      ? '${((event.attributes['speed'] as num) * 3.6).round()} km/h' : null;
+
     return Container(
-      margin: const EdgeInsets.only(bottom: 8),
+      margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
-        color: AC.surface, borderRadius: BorderRadius.circular(14),
-        border: Border(left: BorderSide(color: col, width: 4))),
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border(left: BorderSide(color: col, width: 3)),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8)],
+      ),
       child: Padding(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.all(14),
         child: Row(children: [
-          Container(width: 38, height: 38,
+          Container(width: 36, height: 36,
             decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(12)),
-            child: Icon(m['icon'] as IconData, color: col, size: 20)),
+            child: Icon(meta['icon'] as IconData, color: col, size: 18)),
           const SizedBox(width: 12),
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(m['label'] as String,
-              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AC.text1)),
-            const SizedBox(height: 2),
-            if (event.geofenceId != null) Text('Geofence #${event.geofenceId}',
-              style: const TextStyle(fontSize: 11, color: AC.text3)),
-            Text(event.serverTime != null
-              ? '${(m['label'] as String)} at location' : '—',
-              style: const TextStyle(fontSize: 11, color: AC.text3)),
-            if (event.serverTime != null) Padding(
-              padding: const EdgeInsets.only(top: 3),
-              child: Row(children: [
-                const Icon(Icons.location_on_outlined, size: 11, color: AC.text3),
-                const SizedBox(width: 3),
-                Text(event.attributes['address'] as String? ?? '—',
-                  style: const TextStyle(fontSize: 11, color: AC.text3), overflow: TextOverflow.ellipsis),
-              ])),
+            Row(children: [
+              Expanded(child: Text(label, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.text1))),
+              Text(fmtTimeOnly(event.serverTime), style: const TextStyle(fontSize: 11, color: AppColors.text4)),
+            ]),
+            if (pos != null) ...[
+              const SizedBox(height: 4),
+              Row(children: [
+                const Icon(Icons.location_on_outlined, size: 12, color: AppColors.text4),
+                const SizedBox(width: 4),
+                Text(pos, style: const TextStyle(fontSize: 11, color: AppColors.text3)),
+              ]),
+            ],
+            if (spd != null) ...[
+              const SizedBox(height: 2),
+              Text(label.contains('started') ? '$label at $spd' : '',
+                style: const TextStyle(fontSize: 11, color: AppColors.text3)),
+            ],
           ])),
-          Text(event.serverTime != null ? _shortFmt(event.serverTime!) : '—',
-            style: const TextStyle(fontSize: 11, color: AC.text3)),
         ]),
       ),
     );
   }
-
-  String _shortFmt(DateTime dt) {
-    final l = dt.toLocal();
-    final h = l.hour, ap = h >= 12 ? 'PM' : 'AM', h12 = h % 12 == 0 ? 12 : h % 12;
-    return '${h12.toString().padLeft(2,'0')}:${l.minute.toString().padLeft(2,'0')} $ap';
-  }
 }
 
-// ── Reports Tab ───────────────────────────────────────────────────────────────
+// ══════════════════ TAB 3: REPORTS ════════════════════════════════════════
 class _ReportsTab extends StatefulWidget {
   final TraccarDevice device;
   const _ReportsTab({required this.device});
   @override State<_ReportsTab> createState() => _ReportsTabState();
 }
-
 class _ReportsTabState extends State<_ReportsTab> {
   DateTime _from = DateTime.now().subtract(const Duration(days: 7));
   DateTime _to   = DateTime.now();
-  String _range  = '7days';
 
-  void _setRange(String r) {
-    setState(() {
-      _range = r;
-      final now = DateTime.now();
-      if (r == 'yesterday') { _from = now.subtract(const Duration(days: 1)); _to = now; }
-      else if (r == '7days')  { _from = now.subtract(const Duration(days: 7));  _to = now; }
-      else if (r == 'today')  { _from = DateTime(now.year, now.month, now.day); _to = now; }
-      else if (r == 'month')  { _from = now.subtract(const Duration(days: 30)); _to = now; }
-    });
-  }
+  static const _reports = [
+    {'icon': Icons.directions_car_rounded, 'label': 'Vehicle Master', 'color': 0xFF7C3AED, 'bg': 0xFFF5F3FF},
+    {'icon': Icons.list_alt_rounded,       'label': 'Fleet Summary',  'color': 0xFF7C3AED, 'bg': 0xFFF5F3FF},
+    {'icon': Icons.calendar_month_rounded, 'label': 'Daily Summary',  'color': 0xFF1A73E8, 'bg': 0xFFDBEAFE},
+    {'icon': Icons.route_rounded,          'label': 'Trip Report',    'color': 0xFF16A34A, 'bg': 0xFFDCFCE7},
+    {'icon': Icons.speed_rounded,          'label': 'Speed Report',   'color': 0xFFD97706, 'bg': 0xFFFEF3C7},
+    {'icon': Icons.warning_amber_rounded,  'label': 'Alert Report',   'color': 0xFFDC2626, 'bg': 0xFFFEE2E2},
+  ];
+
+  @override
+  Widget build(BuildContext context) => ListView(padding: const EdgeInsets.all(16), children: [
+    // Date range
+    Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(18),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 8)]),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Text('QUICK SELECT', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: AppColors.text4, letterSpacing: 0.6)),
+        const SizedBox(height: 10),
+        SingleChildScrollView(scrollDirection: Axis.horizontal,
+          child: Row(children: [
+            _QuickBtn('Today',     () => setState(() { _from = DateTime.now(); _to = DateTime.now(); })),
+            _QuickBtn('Yesterday', () { final y = DateTime.now().subtract(const Duration(days: 1)); setState(() { _from = y; _to = y; }); }),
+            _QuickBtn('This Week', () { final n = DateTime.now(); setState(() { _from = n.subtract(Duration(days: n.weekday-1)); _to = n; }); }),
+            _QuickBtn('Last Week', () { final n = DateTime.now(); final s = n.subtract(Duration(days: n.weekday+6)); setState(() { _from = s; _to = s.add(const Duration(days: 6)); }); }),
+          ]),
+        ),
+        const SizedBox(height: 14),
+        Row(children: [
+          Expanded(child: _DateBtn(label: 'START DATE', date: _from, onTap: () async {
+            final p = await showDatePicker(context: context, initialDate: _from, firstDate: DateTime.now().subtract(const Duration(days: 365)), lastDate: DateTime.now());
+            if (p != null) setState(() => _from = p);
+          })),
+          const Padding(padding: EdgeInsets.symmetric(horizontal: 12), child: Icon(Icons.arrow_forward_rounded, color: AppColors.text4, size: 18)),
+          Expanded(child: _DateBtn(label: 'END DATE', date: _to, onTap: () async {
+            final p = await showDatePicker(context: context, initialDate: _to, firstDate: DateTime.now().subtract(const Duration(days: 365)), lastDate: DateTime.now());
+            if (p != null) setState(() => _to = p);
+          })),
+        ]),
+      ]),
+    ),
+    const SizedBox(height: 16),
+    const Text('Functional Reports', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: AppColors.text1)),
+    const SizedBox(height: 12),
+    GridView.count(
+      crossAxisCount: 2, shrinkWrap: true, physics: const NeverScrollableScrollPhysics(),
+      crossAxisSpacing: 12, mainAxisSpacing: 12, childAspectRatio: 1.1,
+      children: _reports.map((r) {
+        final col = Color(r['color'] as int);
+        final bg  = Color(r['bg']    as int);
+        return GestureDetector(
+          onTap: () {},
+          child: Container(
+            decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(18),
+              boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 8)]),
+            child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+              Container(width: 52, height: 52, decoration: BoxDecoration(color: bg, shape: BoxShape.circle),
+                child: Icon(r['icon'] as IconData, color: col, size: 26)),
+              const SizedBox(height: 12),
+              Text(r['label'] as String, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.text1), textAlign: TextAlign.center),
+              const SizedBox(height: 4),
+              const Text('View Report', style: TextStyle(fontSize: 11, color: AppColors.primary, fontWeight: FontWeight.w600)),
+            ]),
+          ),
+        );
+      }).toList(),
+    ),
+  ]);
+}
+
+class _DateBtn extends StatelessWidget {
+  final String label; final DateTime date; final VoidCallback onTap;
+  const _DateBtn({required this.label, required this.date, required this.onTap});
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+    onTap: onTap,
+    child: Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(color: AppColors.background, borderRadius: BorderRadius.circular(12)),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(label, style: const TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: AppColors.text4, letterSpacing: 0.6)),
+        const SizedBox(height: 4),
+        Row(children: [
+          const Icon(Icons.calendar_month_rounded, size: 14, color: AppColors.primary),
+          const SizedBox(width: 6),
+          Text(fmtDateShort(date), style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.text1)),
+        ]),
+      ]),
+    ),
+  );
+}
+
+// ══════════════════ TAB 4: SENSOR ═════════════════════════════════════════
+class _SensorTab extends StatelessWidget {
+  final TraccarDevice device;
+  const _SensorTab({required this.device});
 
   @override
   Widget build(BuildContext context) {
-    final reports = [
-      ('Vehicle Master',  Icons.directions_car_rounded,  const Color(0xFF7C4DFF)),
-      ('Fleet Summary',   Icons.bar_chart_rounded,        const Color(0xFF2196F3)),
-      ('Daily Summary',   Icons.calendar_today_rounded,   const Color(0xFF00BCD4)),
-      ('Trip Report',     Icons.route_rounded,            const Color(0xFF4CAF50)),
-      ('Overspeed Report',Icons.speed_rounded,            const Color(0xFFFF5722)),
-      ('Idle Report',     Icons.timer_off_rounded,        const Color(0xFFFFAB00)),
-    ];
+    final state = context.watch<AppState>();
+    final pos   = state.posFor(device.id);
+    final attrs = pos?.attributes ?? {};
+    final spd   = pos?.speedKmh ?? 0.0;
+    final power = pos?.power;
+    final bat   = (attrs['battery'] as num?)?.toDouble();
+    final charge= pos?.charging;
+    final rssi  = pos?.rssi;
+    final sat   = pos?.satellites;
+    final ignOn = pos?.ignition == true;
+    final blocked = pos?.blocked == true;
+    final odo   = pos?.odometer;
+    final hrs   = pos?.hours;
+    final din1  = attrs['di1'] ?? attrs['in1'] ?? attrs['input1'];
 
-    return ListView(padding: const EdgeInsets.fromLTRB(16, 16, 16, 24), children: [
-      // Date range
-      Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(color: AC.surface, borderRadius: BorderRadius.circular(16)),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const Text('REPORT DATE RANGE', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: AC.text3, letterSpacing: 0.8)),
-          const SizedBox(height: 10),
+    return ListView(padding: const EdgeInsets.all(16), children: [
+      // Power & Battery Health
+      _SensorGroup(
+        icon: Icons.battery_charging_full_rounded,
+        iconColor: AppColors.green,
+        iconBg: const Color(0xFFDCFCE7),
+        title: 'Power & Battery Health',
+        children: [
           Row(children: [
-            _RangeBtn('today',     'Today',    _range),
-            const SizedBox(width: 6),
-            _RangeBtn('yesterday', 'Yesterday', _range),
-            const SizedBox(width: 6),
-            _RangeBtn('7days',     'Last 7 Days', _range),
-            const SizedBox(width: 6),
-            _RangeBtn('month',     '30 Days',  _range),
-          ].map((w) => w is _RangeBtn ? GestureDetector(onTap: () => _setRange(w.value), child: w) : w).toList()),
+            Expanded(child: _SensorBox('EXTERNAL BATTERY', power != null ? '${power.toStringAsFixed(1)} V' : '—', 'Alternator Input')),
+            const SizedBox(width: 10),
+            Expanded(child: _SensorBox('INTERNAL BATTERY', bat != null ? '${bat.toStringAsFixed(1)} V' : '—', 'Backup Cells')),
+          ]),
           const SizedBox(height: 12),
           Row(children: [
-            _DateBox('START DATE', _from),
-            const Padding(padding: EdgeInsets.symmetric(horizontal: 10),
-              child: Icon(Icons.arrow_forward_rounded, color: AC.text3, size: 18)),
-            _DateBox('END DATE', _to),
+            const Icon(Icons.bolt_rounded, size: 18, color: AppColors.orange),
+            const SizedBox(width: 8),
+            const Text('Charging Relay', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.text1)),
+            const Spacer(),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+              decoration: BoxDecoration(
+                color: charge == true ? const Color(0xFFDCFCE7) : AppColors.background,
+                borderRadius: BorderRadius.circular(20)),
+              child: Text(charge == true ? 'CHARGING' : 'NOT CHARGING',
+                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800,
+                  color: charge == true ? AppColors.green : AppColors.text3)),
+            ),
           ]),
-        ]),
+        ],
       ),
-      const SizedBox(height: 20),
-      const Text('Functional Reports', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: AC.text1)),
-      const SizedBox(height: 12),
-      GridView.count(
-        crossAxisCount: 2, shrinkWrap: true,
-        physics: const NeverScrollableScrollPhysics(),
-        crossAxisSpacing: 10, mainAxisSpacing: 10, childAspectRatio: 1.2,
-        children: reports.map((r) => _ReportTile(label: r.$1, icon: r.$2, color: r.$3)).toList()),
+      const SizedBox(height: 14),
+
+      // Connectivity & Signal
+      _SensorGroup(
+        icon: Icons.wifi_rounded,
+        iconColor: AppColors.teal,
+        iconBg: const Color(0xFFCCFBF1),
+        title: 'Connectivity & Signal',
+        children: [
+          Row(children: [
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Text('Network Signal', style: TextStyle(fontSize: 12, color: AppColors.text3)),
+              const SizedBox(height: 4),
+              Text(rssi != null ? '$rssi%' : '—',
+                style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: AppColors.text1)),
+            ])),
+            Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+              const Text('GSM Signal Strength', style: TextStyle(fontSize: 11, color: AppColors.text3)),
+              const SizedBox(height: 6),
+              Row(children: [
+                _SignalBars(rssi ?? 0),
+                const SizedBox(width: 6),
+                Text(rssi != null ? '${((rssi! / 100) * 5).round()}/5 bars' : '—',
+                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.text1)),
+              ]),
+            ]),
+          ]),
+          const Divider(height: 18, color: AppColors.divider),
+          _SensorRowInline('Device Health',  'ACTIVE', AppColors.green),
+          const SizedBox(height: 6),
+          _SensorRowInline('Terminal Info',  attrs['terminalInfo']?.toString() ?? '—', AppColors.text1),
+        ],
+      ),
+      const SizedBox(height: 14),
+
+      // GPS & Compass
+      _SensorGroup(
+        icon: Icons.navigation_rounded,
+        iconColor: AppColors.orange,
+        iconBg: const Color(0xFFFEF3C7),
+        title: 'GPS & Compass Telemetry',
+        children: [
+          Row(children: [
+            Expanded(child: _SensorBox('CURRENT SPEED', '${spd.round()} km/h', null, icon: Icons.speed_rounded, iconColor: AppColors.primary)),
+            const SizedBox(width: 10),
+            Expanded(child: _SensorBox('BEARING COURSE',
+              pos != null ? '${pos.course.round()}° (${_bearing(pos.course)})' : '—',
+              null, icon: Icons.explore_rounded, iconColor: AppColors.orange)),
+          ]),
+          const SizedBox(height: 10),
+          if (pos != null) Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(color: AppColors.background, borderRadius: BorderRadius.circular(12)),
+            child: Row(children: [
+              const Icon(Icons.public_rounded, size: 16, color: AppColors.primary),
+              const SizedBox(width: 8),
+              Text('${pos.latitude.toStringAsFixed(6)}, ${pos.longitude.toStringAsFixed(6)}',
+                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.primary)),
+              const Spacer(),
+              const Icon(Icons.open_in_new_rounded, size: 14, color: AppColors.primary),
+            ]),
+          ),
+          const SizedBox(height: 10),
+          _SensorRowInline('GPS Satellites',
+            sat != null ? '$sat active ($sat raw)' : '—', AppColors.text1,
+            icon: Icons.satellite_alt_rounded),
+        ],
+      ),
+      const SizedBox(height: 14),
+
+      // Relays & Diagnostics
+      _SensorGroup(
+        icon: Icons.handyman_rounded,
+        iconColor: AppColors.purple,
+        iconBg: const Color(0xFFF5F3FF),
+        title: 'Relays & Diagnostic Meters',
+        children: [
+          Row(children: [
+            Expanded(child: _RelayBox(
+              icon: Icons.vpn_key_rounded,
+              label: ignOn ? 'IGNITION ON' : 'IGNITION OFF',
+              sub: 'IGNITION STATE',
+              color: ignOn ? AppColors.green : AppColors.text3)),
+            const SizedBox(width: 10),
+            Expanded(child: _RelayBox(
+              icon: blocked ? Icons.lock_rounded : Icons.lock_open_rounded,
+              label: blocked ? 'ENGINE SECURED' : 'ENGINE ACTIVE',
+              sub: 'IMMOBILIZER',
+              color: blocked ? AppColors.green : AppColors.text3)),
+          ]),
+          const SizedBox(height: 12),
+          _SensorRowInline('Virtual Odometer', odo != null ? '${(odo/1000).toStringAsFixed(1)} km' : '0.0 km', AppColors.primary),
+          const Divider(height: 14, color: AppColors.divider),
+          _SensorRowInline('Engine Hours', hrs != null ? '${hrs.toStringAsFixed(1)} hrs' : '0 hrs', AppColors.text1),
+          const Divider(height: 14, color: AppColors.divider),
+          _SensorRowInline('Digital Input 1 (Relay flag)',
+            din1 != null ? 'HIGH (1)' : 'LOW (0)', AppColors.text1),
+        ],
+      ),
+      const SizedBox(height: 24),
     ]);
   }
 
-  Widget _DateBox(String label, DateTime dt) => Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-    Text(label, style: const TextStyle(fontSize: 9, color: AC.text3, fontWeight: FontWeight.w700, letterSpacing: 0.5)),
-    const SizedBox(height: 6),
-    Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(color: AC.surface2, borderRadius: BorderRadius.circular(10)),
-      child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-        const Icon(Icons.remove_circle_outline_rounded, color: AC.blue, size: 18),
-        Text('${_mon(dt.month)} ${dt.day.toString().padLeft(2,'0')}',
-          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AC.text1)),
-        const Icon(Icons.add_circle_outline_rounded, color: AC.blue, size: 18),
-      ])),
-  ]));
-
-  String _mon(int m) => ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][m-1];
+  String _bearing(double c) {
+    const dirs = ['North','NE','East','SE','South','SW','West','NW'];
+    return dirs[((c + 22.5) ~/ 45) % 8];
+  }
 }
 
-class _RangeBtn extends StatelessWidget {
-  final String value, label, current;
-  const _RangeBtn(this.value, this.label, this.current);
+class _SensorGroup extends StatelessWidget {
+  final IconData icon; final Color iconColor, iconBg;
+  final String title; final List<Widget> children;
+  const _SensorGroup({required this.icon, required this.iconColor, required this.iconBg, required this.title, required this.children});
   @override
   Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+    padding: const EdgeInsets.all(16),
     decoration: BoxDecoration(
-      color: current == value ? AC.blue.withOpacity(0.2) : AC.surface2,
-      borderRadius: BorderRadius.circular(8),
-      border: current == value ? Border.all(color: AC.blue) : null),
-    child: Text(label, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700,
-      color: current == value ? AC.blue : AC.text3)));
-}
-
-class _ReportTile extends StatelessWidget {
-  final String label;
-  final IconData icon;
-  final Color color;
-  const _ReportTile({required this.label, required this.icon, required this.color});
-  @override
-  Widget build(BuildContext context) => Container(
-    decoration: BoxDecoration(color: AC.surface, borderRadius: BorderRadius.circular(16)),
-    child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-      Container(width: 52, height: 52,
-        decoration: BoxDecoration(color: color.withOpacity(0.15), shape: BoxShape.circle),
-        child: Icon(icon, color: color, size: 26)),
-      const SizedBox(height: 10),
-      Text(label, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AC.text1), textAlign: TextAlign.center),
-      const SizedBox(height: 4),
-      const Text('View Report', style: TextStyle(fontSize: 11, color: AC.blue, fontWeight: FontWeight.w600)),
+      color: AppColors.surface, borderRadius: BorderRadius.circular(20),
+      boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10)]),
+    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Row(children: [
+        Container(width: 38, height: 38, decoration: BoxDecoration(color: iconBg, shape: BoxShape.circle),
+          child: Icon(icon, color: iconColor, size: 20)),
+        const SizedBox(width: 12),
+        Text(title, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: AppColors.text1)),
+      ]),
+      const SizedBox(height: 14),
+      ...children,
     ]),
   );
+}
+
+class _SensorBox extends StatelessWidget {
+  final String label, value; final String? sub;
+  final IconData? icon; final Color? iconColor;
+  const _SensorBox(this.label, this.value, this.sub, {this.icon, this.iconColor});
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.all(12),
+    decoration: BoxDecoration(color: AppColors.background, borderRadius: BorderRadius.circular(14)),
+    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      if (icon != null) Icon(icon!, size: 22, color: iconColor ?? AppColors.primary),
+      if (icon != null) const SizedBox(height: 6),
+      Text(value, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: AppColors.text1)),
+      const SizedBox(height: 2),
+      Text(label, style: const TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: AppColors.text4, letterSpacing: 0.5)),
+      if (sub != null) Text(sub!, style: const TextStyle(fontSize: 10, color: AppColors.text3)),
+    ]),
+  );
+}
+
+class _SensorRowInline extends StatelessWidget {
+  final String label, value; final Color color; final IconData? icon;
+  const _SensorRowInline(this.label, this.value, this.color, {this.icon});
+  @override
+  Widget build(BuildContext context) => Row(children: [
+    if (icon != null) ...[Icon(icon!, size: 16, color: AppColors.text4), const SizedBox(width: 8)],
+    Expanded(child: Text(label, style: const TextStyle(fontSize: 13, color: AppColors.text3))),
+    Text(value, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: color)),
+  ]);
+}
+
+class _RelayBox extends StatelessWidget {
+  final IconData icon; final String label, sub; final Color color;
+  const _RelayBox({required this.icon, required this.label, required this.sub, required this.color});
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.all(12),
+    decoration: BoxDecoration(color: AppColors.background, borderRadius: BorderRadius.circular(14)),
+    child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.center, children: [
+      Icon(icon, size: 24, color: color),
+      const SizedBox(height: 6),
+      Text(label, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: color), textAlign: TextAlign.center),
+      const SizedBox(height: 2),
+      Text(sub, style: const TextStyle(fontSize: 9, color: AppColors.text4, letterSpacing: 0.4), textAlign: TextAlign.center),
+    ]),
+  );
+}
+
+class _SignalBars extends StatelessWidget {
+  final int rssi;
+  const _SignalBars(this.rssi);
+  @override
+  Widget build(BuildContext context) {
+    final bars = ((rssi / 100) * 5).round().clamp(0, 5);
+    return Row(children: List.generate(5, (i) => Container(
+      width: 5, height: 6.0 + i * 3,
+      margin: const EdgeInsets.only(right: 2),
+      decoration: BoxDecoration(
+        color: i < bars ? AppColors.green : AppColors.text4.withOpacity(0.3),
+        borderRadius: BorderRadius.circular(2)),
+    )));
+  }
+}
+
+// ══════════════════ TAB 5: COMMANDS ═══════════════════════════════════════
+class _CommandsTab extends StatefulWidget {
+  final TraccarDevice device;
+  const _CommandsTab({required this.device});
+  @override State<_CommandsTab> createState() => _CommandsTabState();
+}
+class _CommandsTabState extends State<_CommandsTab> {
+  bool _sending = false;
+  String? _result;
+  List<Map<String, dynamic>> _history = [];
+  bool _isBlocked = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final pos = Provider.of<AppState>(context, listen: false).posFor(widget.device.id);
+    _isBlocked = pos?.blocked == true;
+  }
+
+  Future<void> _send(String type) async {
+    final confirm = await showDialog<bool>(context: context, builder: (_) => AlertDialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+      title: Text(type == 'engineStop' ? 'Immobilize Engine?' : 'Un-Immobilize Engine?'),
+      content: Text(type == 'engineStop'
+        ? 'This will send a remote engine stop command. The vehicle will be immobilized.'
+        : 'This will remove the engine block and allow the vehicle to start.'),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+        ElevatedButton(onPressed: () => Navigator.pop(context, true),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: type == 'engineStop' ? AppColors.red : AppColors.green),
+          child: const Text('Confirm')),
+      ],
+    ));
+    if (confirm != true) return;
+
+    setState(() { _sending = true; _result = null; });
+    final svc = context.read<AppState>().service;
+    if (svc != null) {
+      final res = await svc.sendCommand(deviceId: widget.device.id, type: type);
+      final now = DateTime.now();
+      setState(() {
+        _result = res['error'] != null ? 'Error: ${res['error']}' : 'Command queued successfully';
+        _isBlocked = type == 'engineStop';
+        _history.insert(0, {
+          'type': type == 'engineStop' ? 'Immobilize' : 'Unimmobilize',
+          'time': now,
+          'status': res['error'] == null ? 'sent' : 'failed',
+          'note': res['error'] == null ? 'Recovery confirmed' : res['error'],
+        });
+      });
+    }
+    setState(() => _sending = false);
+  }
+
+  @override
+  Widget build(BuildContext context) => ListView(padding: const EdgeInsets.all(16), children: [
+    const Text('Remote Immobilization',
+      style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: AppColors.text1)),
+    const SizedBox(height: 14),
+
+    // Status card
+    Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: _isBlocked ? const Color(0xFFFEE2E2) : const Color(0xFFDCFCE7),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: _isBlocked ? AppColors.red.withOpacity(0.3) : AppColors.green.withOpacity(0.3)),
+      ),
+      child: Row(children: [
+        Icon(_isBlocked ? Icons.lock_rounded : Icons.lock_open_rounded,
+          size: 28, color: _isBlocked ? AppColors.red : AppColors.green),
+        const SizedBox(width: 12),
+        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(_isBlocked ? 'Engine immobilized' : 'Engine not immobilized',
+            style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800,
+              color: _isBlocked ? AppColors.red : AppColors.green)),
+          Text('Status updates when you queue a command and after the device confirms.',
+            style: const TextStyle(fontSize: 12, color: AppColors.text3)),
+        ])),
+      ]),
+    ),
+    const SizedBox(height: 14),
+
+    if (_result != null) Container(
+      padding: const EdgeInsets.all(12),
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: _result!.contains('Error') ? const Color(0xFFFEE2E2) : const Color(0xFFDCFCE7),
+        borderRadius: BorderRadius.circular(12)),
+      child: Row(children: [
+        Icon(_result!.contains('Error') ? Icons.error_outline : Icons.check_circle_outline,
+          color: _result!.contains('Error') ? AppColors.red : AppColors.green, size: 18),
+        const SizedBox(width: 8),
+        Expanded(child: Text(_result!, style: TextStyle(fontSize: 13,
+          color: _result!.contains('Error') ? AppColors.red : AppColors.green))),
+      ]),
+    ),
+
+    // Immobilize button
+    SizedBox(width: double.infinity, child: ElevatedButton.icon(
+      onPressed: _sending ? null : () => _send('engineStop'),
+      icon: const Icon(Icons.lock_rounded, size: 18),
+      label: _sending ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+        : const Text('Immobilize Engine'),
+      style: ElevatedButton.styleFrom(
+        backgroundColor: AppColors.red,
+        padding: const EdgeInsets.symmetric(vertical: 14),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      ),
+    )),
+    const SizedBox(height: 10),
+
+    // Un-immobilize button
+    SizedBox(width: double.infinity, child: ElevatedButton.icon(
+      onPressed: _sending ? null : () => _send('engineResume'),
+      icon: const Icon(Icons.lock_open_rounded, size: 18),
+      label: const Text('Un-Immobilize Engine'),
+      style: ElevatedButton.styleFrom(
+        backgroundColor: AppColors.green,
+        padding: const EdgeInsets.symmetric(vertical: 14),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      ),
+    )),
+    const SizedBox(height: 6),
+    const Center(child: Text('Commands are queued and sent on next device uplink.',
+      style: TextStyle(fontSize: 11, color: AppColors.text4))),
+    const SizedBox(height: 20),
+
+    if (_history.isNotEmpty) ...[
+      const Text('Command history',
+        style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: AppColors.text1)),
+      const SizedBox(height: 10),
+      ..._history.map((h) => Container(
+        margin: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(16),
+          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8)]),
+        child: Row(children: [
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(h['type'] as String, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.text1)),
+            const SizedBox(height: 3),
+            Text(fmtDateTime(h['time'] as DateTime?), style: const TextStyle(fontSize: 11, color: AppColors.text3)),
+            if ((h['note'] as String?)?.isNotEmpty == true)
+              Text(h['note'] as String, style: const TextStyle(fontSize: 11, color: AppColors.text3)),
+          ])),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            decoration: BoxDecoration(
+              color: h['status'] == 'sent' ? const Color(0xFFDCFCE7) : const Color(0xFFFEE2E2),
+              borderRadius: BorderRadius.circular(20)),
+            child: Text(h['status'] as String, style: TextStyle(
+              fontSize: 11, fontWeight: FontWeight.w700,
+              color: h['status'] == 'sent' ? AppColors.green : AppColors.red)),
+          ),
+        ]),
+      )),
+    ],
+    const SizedBox(height: 24),
+  ]);
+}
+
+// ── Shared helpers ──────────────────────────────────────────────────────────
+class _DetailRow extends StatelessWidget {
+  final String label, value; final Color? valueColor; final bool bold;
+  const _DetailRow(this.label, this.value, {this.valueColor, this.bold = false});
+  @override
+  Widget build(BuildContext context) => Row(children: [
+    Text(label, style: const TextStyle(fontSize: 14, color: AppColors.text3)),
+    const Spacer(),
+    Text(value, style: TextStyle(fontSize: 14, fontWeight: bold ? FontWeight.w800 : FontWeight.w600,
+      color: valueColor ?? AppColors.text1)),
+  ]);
+}
+
+// Speedometer arc widget
+class _SpeedArc extends StatelessWidget {
+  final double speed;
+  const _SpeedArc({required this.speed});
+  @override
+  Widget build(BuildContext context) => SizedBox(
+    height: 130,
+    child: CustomPaint(painter: _ArcPainter(speed), child: Center(
+      child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+        const SizedBox(height: 20),
+        Text('${speed.round()}', style: const TextStyle(fontSize: 48, fontWeight: FontWeight.w900, color: AppColors.text1, height: 1)),
+        const Text('km/h', style: TextStyle(fontSize: 14, color: AppColors.text3)),
+      ]),
+    )),
+  );
+}
+
+class _ArcPainter extends CustomPainter {
+  final double speed;
+  _ArcPainter(this.speed);
+  @override
+  void paint(Canvas canvas, Size size) {
+
+    final cx = size.width / 2, cy = size.height * 0.85;
+    final r  = size.width * 0.42;
+    const startAngle = math.pi;
+    const sweep = math.pi;
+    canvas.drawArc(Rect.fromCircle(center: Offset(cx, cy), radius: r), startAngle, sweep, false,
+      Paint()..color = const Color(0xFFE5E7EB)..style = PaintingStyle.stroke..strokeWidth = 8..strokeCap = StrokeCap.round);
+    final pct = (speed / 200).clamp(0.0, 1.0);
+    if (pct > 0) {
+      canvas.drawArc(Rect.fromCircle(center: Offset(cx, cy), radius: r), startAngle, sweep * pct, false,
+        Paint()..color = speed > 100 ? const Color(0xFFDC2626) : speed > 60 ? const Color(0xFFD97706) : const Color(0xFF1A73E8)
+          ..style = PaintingStyle.stroke..strokeWidth = 8..strokeCap = StrokeCap.round);
+    }
+    // Labels
+    final tp = TextPainter(textDirection: TextDirection.ltr);
+    for (final v in [0, 100, 200]) {
+      final a = startAngle + sweep * (v / 200);
+      tp..text = TextSpan(text: '$v', style: const TextStyle(fontSize: 10, color: Color(0xFF94A3B8)))..layout();
+      canvas.drawLine(Offset(cx + (r-12)*math.cos(a), cy + (r-12)*math.sin(a)),
+        Offset(cx + (r+4)*math.cos(a), cy + (r+4)*math.sin(a)),
+        Paint()..color = const Color(0xFFCBD5E1)..strokeWidth = 1.5);
+    }
+  }
+  @override bool shouldRepaint(_ArcPainter o) => o.speed != speed;
 }

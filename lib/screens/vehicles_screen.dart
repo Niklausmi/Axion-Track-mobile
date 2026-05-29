@@ -1,118 +1,147 @@
-// lib/screens/vehicles_screen.dart
+// lib/screens/vehicles_screen.dart — v3
+// Matches reference: search bar, vehicle cards with plate/model/status/sensors
+// Tapping opens VehicleDetailScreen with tabs: Dashboard|Trips|Alerts|Reports|Sensor|Commands
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../services/app_state.dart';
 import '../models/traccar_models.dart';
 import '../utils/theme.dart';
-import '../widgets/shared_widgets.dart';
 import 'vehicle_detail_screen.dart';
 
 class VehiclesScreen extends StatefulWidget {
   const VehiclesScreen({super.key});
-  @override State<VehiclesScreen> createState() => _VehiclesScreenState();
+  @override
+  State<VehiclesScreen> createState() => _VehiclesScreenState();
 }
 
-class _VehiclesScreenState extends State<VehiclesScreen> {
-  final _ctrl = TextEditingController();
-  String _q = '';
-  DeviceStatus? _filter;
-  String _sort = 'name'; // name | status | updated
+class _VehiclesScreenState extends State<VehiclesScreen> with AutomaticKeepAliveClientMixin {
+  @override bool get wantKeepAlive => true;
 
-  @override void dispose() { _ctrl.dispose(); super.dispose(); }
+  final _searchCtrl = TextEditingController();
+  String _query = '';
+  DeviceStatus? _filter;
+
+  @override
+  void dispose() { _searchCtrl.dispose(); super.dispose(); }
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     final state = context.watch<AppState>();
-
-    final list = state.devices.where((d) {
-      final s = state.statusFor(d);
-      if (_filter != null && s != _filter) return false;
-      if (_q.isNotEmpty && !d.name.toLowerCase().contains(_q.toLowerCase()) &&
-          !d.uniqueId.contains(_q)) {
-        return false;
-      }
+    final filtered = state.devices.where((d) {
+      if (_filter != null && state.statusFor(d) != _filter) return false;
+      if (_query.isNotEmpty && !d.name.toLowerCase().contains(_query.toLowerCase()) &&
+          !d.uniqueId.contains(_query)) return false;
       return true;
     }).toList();
 
-    // Sort
-    list.sort((a, b) {
-      if (_sort == 'status') return state.statusFor(a).index.compareTo(state.statusFor(b).index);
-      if (_sort == 'updated') {
-        final pa = state.posFor(a.id)?.serverTime, pb = state.posFor(b.id)?.serverTime;
-        if (pa == null && pb == null) return 0;
-        if (pa == null) return 1;
-        if (pb == null) return -1;
-        return pb.compareTo(pa);
-      }
-      return a.name.compareTo(b.name);
-    });
-
-    return Column(children: [
-      // Search + sort
-      Container(
-        color: AC.surface,
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-        child: Row(children: [
-          Expanded(child: TextField(
-            controller: _ctrl,
-            onChanged: (v) => setState(() => _q = v),
-            style: const TextStyle(color: AC.text1, fontSize: 14),
-            decoration: InputDecoration(
-              hintText: 'Search by plate number…',
-              prefixIcon: const Icon(Icons.search, color: AC.text3, size: 20),
-              suffixIcon: _q.isNotEmpty ? IconButton(
-                icon: const Icon(Icons.close, size: 18, color: AC.text3),
-                onPressed: () { _ctrl.clear(); setState(() => _q = ''); }) : null,
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      body: SafeArea(child: Column(children: [
+        // Header
+        Container(
+          color: AppColors.surface,
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+          child: Column(children: [
+            const Align(alignment: Alignment.centerLeft,
+              child: Text('Vehicles', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900, color: AppColors.text1))),
+            const SizedBox(height: 12),
+            // Search bar
+            Container(
+              decoration: BoxDecoration(
+                color: AppColors.background,
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: TextField(
+                controller: _searchCtrl,
+                onChanged: (v) => setState(() => _query = v),
+                decoration: InputDecoration(
+                  hintText: 'Search by plate number...',
+                  hintStyle: const TextStyle(color: AppColors.text4),
+                  prefixIcon: const Icon(Icons.search_rounded, color: AppColors.text4, size: 20),
+                  suffixIcon: _query.isNotEmpty ? IconButton(
+                    icon: const Icon(Icons.close_rounded, size: 18, color: AppColors.text4),
+                    onPressed: () { _searchCtrl.clear(); setState(() => _query = ''); },
+                  ) : null,
+                  border: InputBorder.none,
+                  contentPadding: const EdgeInsets.symmetric(vertical: 14),
+                ),
+              ),
             ),
-          )),
-          const SizedBox(width: 8),
-          _SortBtn(current: _sort, onChange: (v) => setState(() => _sort = v)),
-        ]),
-      ),
-
-      // Filter chips
-      Container(
-        color: AC.surface,
-        padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-        child: SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: Row(children: [
-            _FChip(label: 'All', selected: _filter == null, color: AC.text2, onTap: () => setState(() => _filter = null)),
-            const SizedBox(width: 6),
-            ...DeviceStatus.values.map((s) => Padding(
-              padding: const EdgeInsets.only(right: 6),
-              child: _FChip(
-                label: statusLabel(s),
-                count: state.statusCounts[s] ?? 0,
-                selected: _filter == s,
-                color: AC.forStatus(s),
-                onTap: () => setState(() => _filter = _filter == s ? null : s)))),
+            const SizedBox(height: 10),
+            // Filter pills
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(children: [
+                _pill('All', null, state),
+                _pill('Moving',   DeviceStatus.running, state),
+                _pill('Stopped',  DeviceStatus.stopped, state),
+                _pill('Idle',     DeviceStatus.idle,    state),
+                _pill('Inactive', DeviceStatus.offline, state),
+              ]),
+            ),
+            const SizedBox(height: 10),
           ]),
         ),
-      ),
 
-      // List
-      Expanded(child: state.isLoading
-        ? ListView.builder(padding: const EdgeInsets.all(16),
-            itemCount: 4, itemBuilder: (_, __) => const Padding(
-              padding: EdgeInsets.only(bottom: 10), child: ShimmerCard(height: 160)))
-        : list.isEmpty
-          ? const EmptyState(icon: Icons.directions_car_outlined, message: 'No vehicles found')
-          : ListView.builder(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-              itemCount: list.length,
-              itemBuilder: (ctx, i) {
-                final d = list[i];
-                final p = state.posFor(d.id);
-                final s = state.statusFor(d);
-                return _VehicleCard(device: d, pos: p, status: s,
-                  onTap: () => Navigator.push(ctx, MaterialPageRoute(
-                    builder: (_) => VehicleDetailScreen(device: d))));
-              })),
-    ]);
+        // List
+        Expanded(child: state.isLoading && state.devices.isEmpty
+          ? const Center(child: CircularProgressIndicator(color: AppColors.primary, strokeWidth: 2))
+          : filtered.isEmpty
+            ? const Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                Icon(Icons.directions_car_outlined, size: 56, color: AppColors.text4),
+                SizedBox(height: 12),
+                Text('No vehicles found', style: TextStyle(fontSize: 15, color: AppColors.text3)),
+              ]))
+            : RefreshIndicator(
+                onRefresh: state.refresh,
+                color: AppColors.primary,
+                child: ListView.builder(
+                  padding: const EdgeInsets.fromLTRB(16, 10, 16, 24),
+                  itemCount: filtered.length,
+                  itemBuilder: (ctx, i) {
+                    final d = filtered[i];
+                    final p = state.posFor(d.id);
+                    final s = state.statusFor(d);
+                    return _VehicleCard(
+                      device: d, pos: p, status: s,
+                      onTap: () => Navigator.push(ctx, MaterialPageRoute(
+                        builder: (_) => VehicleDetailScreen(device: d))),
+                    );
+                  },
+                ),
+              ),
+        ),
+      ])),
+    );
+  }
+
+  Widget _pill(String label, DeviceStatus? status, AppState state) {
+    final selected = _filter == status;
+    final col = status != null ? AppColors.forStatus(status) : AppColors.primary;
+    final count = status == null ? state.devices.length
+        : state.statusCounts[status] ?? 0;
+    return GestureDetector(
+      onTap: () => setState(() => _filter = status),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        margin: const EdgeInsets.only(right: 8, bottom: 2),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+        decoration: BoxDecoration(
+          color: selected ? col.withOpacity(0.12) : AppColors.background,
+          borderRadius: BorderRadius.circular(20),
+          border: selected ? Border.all(color: col, width: 1.5) : Border.all(color: AppColors.divider),
+        ),
+        child: Text('$label ($count)', style: TextStyle(
+          fontSize: 12, fontWeight: FontWeight.w600,
+          color: selected ? col : AppColors.text3)),
+      ),
+    );
   }
 }
 
+// ── Vehicle card — matches reference image 4 ─────────────────────────────
 class _VehicleCard extends StatelessWidget {
   final TraccarDevice device;
   final TraccarPosition? pos;
@@ -122,148 +151,133 @@ class _VehicleCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final col = AC.forStatus(status);
-    final spd = pos?.speedKmh.round() ?? 0;
-    final stLabel = status == DeviceStatus.stopped && pos?.serverTime != null
-      ? 'Stopped (${stoppedFor(pos!.serverTime)})' : statusLabel(status);
+    final col  = AppColors.forStatus(status);
+    final bg   = AppColors.bgForStatus(status);
+    final spd  = pos?.speedKmh.round() ?? 0;
+    final ignOn = pos?.ignition == true;
+    final blocked = pos?.blocked == true;
+    final hasLoc = pos != null;
 
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        margin: const EdgeInsets.only(bottom: 10),
+        margin: const EdgeInsets.only(bottom: 12),
         decoration: BoxDecoration(
-          color: AC.surface,
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.2), blurRadius: 8, offset: const Offset(0,2))]),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          // Header row
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(18),
+          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 3))],
+        ),
+        child: Column(children: [
+          // Top row
           Padding(
-            padding: const EdgeInsets.fromLTRB(14, 12, 14, 0),
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
             child: Row(children: [
-              // Coloured car icon
+              // Car icon
               Container(
-                width: 42, height: 42,
-                decoration: BoxDecoration(color: col.withOpacity(0.15), borderRadius: BorderRadius.circular(12)),
-                child: Icon(Icons.directions_car_rounded, color: col, size: 24)),
+                width: 48, height: 48,
+                decoration: BoxDecoration(color: bg, shape: BoxShape.circle),
+                child: Icon(Icons.directions_car_rounded, color: col, size: 26)),
               const SizedBox(width: 12),
               Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(device.name, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: AC.text1)),
+                Text(device.name,
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: AppColors.text1)),
                 Text(device.model ?? device.uniqueId,
-                  style: const TextStyle(fontSize: 12, color: AC.text3)),
+                  style: const TextStyle(fontSize: 12, color: AppColors.text3)),
               ])),
-              StatusBadge(status),
+              // Status badge
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(20)),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  _PulseDot(color: col, pulse: status == DeviceStatus.running),
+                  const SizedBox(width: 5),
+                  Text(statusLabel(status).toUpperCase(),
+                    style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: col, letterSpacing: 0.5)),
+                ]),
+              ),
             ]),
           ),
 
-          // Coords + open maps
+          // Location strip
           Padding(
-            padding: const EdgeInsets.fromLTRB(14, 10, 14, 0),
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              decoration: BoxDecoration(color: AC.surface2, borderRadius: BorderRadius.circular(10)),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: hasLoc && pos!.address != null ? AppColors.primary.withOpacity(0.06) : AppColors.background,
+                borderRadius: BorderRadius.circular(12),
+              ),
               child: Row(children: [
-                const Icon(Icons.location_on_rounded, size: 14, color: AC.blue),
-                const SizedBox(width: 6),
+                Icon(Icons.location_on_rounded, size: 16,
+                  color: hasLoc ? AppColors.primary : AppColors.text4),
+                const SizedBox(width: 8),
                 Expanded(child: Text(
-                  pos?.address ?? (pos != null
-                    ? '${pos!.latitude.toStringAsFixed(5)}, ${pos!.longitude.toStringAsFixed(5)}'
-                    : device.lastUpdate != null ? 'Last active ${timeAgo(device.lastUpdate)}' : 'No position'),
-                  style: const TextStyle(fontSize: 12, color: AC.blue, fontWeight: FontWeight.w500),
-                  overflow: TextOverflow.ellipsis)),
-                const Icon(Icons.open_in_new_rounded, size: 14, color: AC.blue),
+                  hasLoc
+                    ? (pos!.address ?? '${pos!.latitude.toStringAsFixed(5)}, ${pos!.longitude.toStringAsFixed(5)}')
+                    : 'Location unavailable\nLast active: Never',
+                  style: TextStyle(
+                    fontSize: 12, fontWeight: FontWeight.w500,
+                    color: hasLoc ? AppColors.primary : AppColors.text3),
+                  maxLines: 2, overflow: TextOverflow.ellipsis)),
+                if (hasLoc) const Icon(Icons.open_in_new_rounded, size: 14, color: AppColors.primary),
               ]),
             ),
           ),
 
-          // Stats row
+          // Sensor row
           Padding(
-            padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 14),
             child: Row(children: [
-              _Stat(Icons.speed_rounded, '$spd km/h'),
-              const SizedBox(width: 16),
-              _Stat(Icons.vpn_key_rounded, pos?.ignition == true ? 'ON' : 'OFF',
-                col: pos?.ignition == true ? AC.green : AC.text3),
-              const SizedBox(width: 16),
-              _Stat(Icons.access_time_rounded,
-                pos?.serverTime != null ? _shortTime(pos!.serverTime!) : device.lastUpdate != null ? _shortTime(device.lastUpdate!) : '—'),
+              _SensorPill(Icons.speed_rounded,            '$spd km/h'),
+              const SizedBox(width: 12),
+              _SensorPill(Icons.vpn_key_rounded,          ignOn ? 'ON' : 'OFF',    color: ignOn ? AppColors.green : null),
+              const SizedBox(width: 12),
+              _SensorPill(blocked ? Icons.lock_rounded : Icons.lock_open_rounded,
+                blocked ? 'LOCKED' : 'OPEN',
+                color: blocked ? AppColors.red : null),
+              const Spacer(),
+              if (pos?.serverTime != null)
+                Row(children: [
+                  const Icon(Icons.access_time_rounded, size: 13, color: AppColors.text4),
+                  const SizedBox(width: 4),
+                  Text(fmtTimeOnly(pos!.serverTime),
+                    style: const TextStyle(fontSize: 11, color: AppColors.text4)),
+                ]),
             ]),
           ),
         ]),
       ),
     );
   }
+}
 
-  String _shortTime(DateTime dt) {
-    final l = dt.toLocal();
-    final h = l.hour, ap = h >= 12 ? 'PM' : 'AM', h12 = h % 12 == 0 ? 12 : h % 12;
-    return '${h12.toString().padLeft(2,'0')}:${l.minute.toString().padLeft(2,'0')} $ap';
-  }
-
-  Widget _Stat(IconData ico, String val, {Color? col}) => Row(mainAxisSize: MainAxisSize.min, children: [
-    Icon(ico, size: 14, color: col ?? AC.text3),
+class _SensorPill extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Color? color;
+  const _SensorPill(this.icon, this.label, {this.color});
+  @override
+  Widget build(BuildContext context) => Row(mainAxisSize: MainAxisSize.min, children: [
+    Icon(icon, size: 14, color: color ?? AppColors.text4),
     const SizedBox(width: 4),
-    Text(val, style: TextStyle(fontSize: 13, color: col ?? AC.text2, fontWeight: FontWeight.w600)),
+    Text(label, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: color ?? AppColors.text3)),
   ]);
 }
 
-class _FChip extends StatelessWidget {
-  final String label;
-  final int? count;
-  final bool selected;
-  final Color color;
-  final VoidCallback onTap;
-  const _FChip({required this.label, this.count, required this.selected, required this.color, required this.onTap});
-  @override
-  Widget build(BuildContext context) => GestureDetector(
-    onTap: onTap,
-    child: AnimatedContainer(
-      duration: const Duration(milliseconds: 150),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-      decoration: BoxDecoration(
-        color: selected ? color.withOpacity(0.2) : AC.surface2,
-        borderRadius: BorderRadius.circular(20),
-        border: selected ? Border.all(color: color, width: 1.5) : null),
-      child: Row(mainAxisSize: MainAxisSize.min, children: [
-        if (count != null) ...[
-          Container(width: 7, height: 7, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
-          const SizedBox(width: 5),
-        ],
-        Text(label, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700,
-          color: selected ? color : AC.text3)),
-        if (count != null) ...[
-          const SizedBox(width: 4),
-          Text('($count)', style: TextStyle(fontSize: 11, color: selected ? color : AC.text4)),
-        ],
-      ]),
-    ),
-  );
+class _PulseDot extends StatefulWidget {
+  final Color color; final bool pulse;
+  const _PulseDot({required this.color, required this.pulse});
+  @override State<_PulseDot> createState() => _PulseDotState();
 }
-
-class _SortBtn extends StatelessWidget {
-  final String current;
-  final ValueChanged<String> onChange;
-  const _SortBtn({required this.current, required this.onChange});
+class _PulseDotState extends State<_PulseDot> with SingleTickerProviderStateMixin {
+  late final AnimationController _c;
+  @override void initState() { super.initState(); _c = AnimationController(vsync: this, duration: const Duration(milliseconds: 900))..repeat(reverse: true); }
+  @override void dispose() { _c.dispose(); super.dispose(); }
   @override
-  Widget build(BuildContext context) => GestureDetector(
-    onTap: () => showModalBottomSheet(
-      context: context,
-      backgroundColor: AC.surface,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (_) => Column(mainAxisSize: MainAxisSize.min, children: [
-        Container(width: 36, height: 4, margin: const EdgeInsets.symmetric(vertical: 12),
-          decoration: BoxDecoration(color: AC.surface3, borderRadius: BorderRadius.circular(2))),
-        const Padding(padding: EdgeInsets.all(16),
-          child: Text('Sort by', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: AC.text1))),
-        ...[('name','Name'),('status','Status'),('updated','Last Updated')].map((e) =>
-          ListTile(
-            title: Text(e.$2, style: TextStyle(color: current == e.$1 ? AC.blue : AC.text1, fontWeight: FontWeight.w600)),
-            trailing: current == e.$1 ? const Icon(Icons.check_rounded, color: AC.blue) : null,
-            onTap: () { onChange(e.$1); Navigator.pop(context); })),
-        const SizedBox(height: 16),
-      ]),
-    ),
-    child: Container(
-      width: 40, height: 48,
-      decoration: BoxDecoration(color: AC.surface2, borderRadius: BorderRadius.circular(12)),
-      child: const Icon(Icons.sort_rounded, color: AC.text2, size: 20)));
+  Widget build(BuildContext context) {
+    if (!widget.pulse) return Container(width: 6, height: 6, decoration: BoxDecoration(color: widget.color, shape: BoxShape.circle));
+    return ScaleTransition(scale: Tween(begin: 0.7, end: 1.0).animate(CurvedAnimation(parent: _c, curve: Curves.easeInOut)),
+      child: Container(width: 6, height: 6, decoration: BoxDecoration(color: widget.color, shape: BoxShape.circle,
+        boxShadow: [BoxShadow(color: widget.color.withOpacity(0.6), blurRadius: 4, spreadRadius: 1)])));
+  }
 }

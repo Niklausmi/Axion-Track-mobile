@@ -1,213 +1,200 @@
-// lib/utils/theme.dart
+// lib/utils/theme.dart — v3
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../models/traccar_models.dart';
 
-// ── Colours ───────────────────────────────────────────────────────────────────
-class AC {
-  // Brand
-  static const blue     = Color(0xFF2196F3);
-  static const blueDark = Color(0xFF1565C0);
-  static const cyan     = Color(0xFF00B4D8);
+class AppColors {
+  // Core
+  static const primary     = Color(0xFF1A73E8);
+  static const primaryDark = Color(0xFF1558B0);
+  static const accent      = Color(0xFF0EA5E9);
+  static const surface     = Color(0xFFFFFFFF);
+  static const background  = Color(0xFFF4F6FA);
+  static const card        = Color(0xFFFFFFFF);
 
   // Status
-  static const moving   = Color(0xFF00C853);
-  static const idle     = Color(0xFFFFAB00);
-  static const stopped  = Color(0xFFFF1744);
-  static const inactive = Color(0xFF90A4AE);
-  static const offline  = Color(0xFF607D8B);
-  static const nodata   = Color(0xFF78909C);
-
-  // Dark surfaces
-  static const bg       = Color(0xFF0A0E1A);
-  static const surface  = Color(0xFF111827);
-  static const surface2 = Color(0xFF1A2235);
-  static const surface3 = Color(0xFF1E2A40);
-  static const card     = Color(0xFF162032);
+  static const running = Color(0xFF16A34A);
+  static const stopped = Color(0xFFDC2626);
+  static const idle    = Color(0xFFD97706);
+  static const offline = Color(0xFF64748B);
+  static const nodata  = Color(0xFF94A3B8);
+  static const expired = Color(0xFF7C3AED);
 
   // Text
-  static const text1  = Color(0xFFFFFFFF);
-  static const text2  = Color(0xFFB0BEC5);
-  static const text3  = Color(0xFF607D8B);
-  static const text4  = Color(0xFF37474F);
+  static const text1 = Color(0xFF0F172A);
+  static const text2 = Color(0xFF1E293B);
+  static const text3 = Color(0xFF475569);
+  static const text4 = Color(0xFF94A3B8);
 
-  // Misc
-  static const red    = Color(0xFFFF1744);
-  static const green  = Color(0xFF00C853);
-  static const orange = Color(0xFFFFAB00);
-  static const purple = Color(0xFF7C4DFF);
+  // Utility
+  static const green  = Color(0xFF16A34A);
+  static const red    = Color(0xFFDC2626);
+  static const orange = Color(0xFFD97706);
+  static const blue   = Color(0xFF1A73E8);
+  static const purple = Color(0xFF7C3AED);
+  static const teal   = Color(0xFF0891B2);
+  static const divider = Color(0xFFE8EDF4);
 
   static Color forStatus(DeviceStatus s) {
     switch (s) {
-      case DeviceStatus.moving:   return moving;
-      case DeviceStatus.idle:     return idle;
-      case DeviceStatus.stopped:  return stopped;
-      case DeviceStatus.inactive: return inactive;
-      case DeviceStatus.offline:  return offline;
-      case DeviceStatus.nodata:   return nodata;
+      case DeviceStatus.running: return running;
+      case DeviceStatus.stopped: return stopped;
+      case DeviceStatus.idle:    return idle;
+      case DeviceStatus.offline: return offline;
+      case DeviceStatus.nodata:  return nodata;
+      case DeviceStatus.expired: return expired;
     }
   }
 
-  static Color bgForStatus(DeviceStatus s) =>
-    forStatus(s).withOpacity(0.15);
+  static Color bgForStatus(DeviceStatus s) {
+    switch (s) {
+      case DeviceStatus.running: return const Color(0xFFDCFCE7);
+      case DeviceStatus.stopped: return const Color(0xFFFEE2E2);
+      case DeviceStatus.idle:    return const Color(0xFFFEF3C7);
+      case DeviceStatus.offline: return const Color(0xFFF1F5F9);
+      case DeviceStatus.nodata:  return const Color(0xFFF8FAFC);
+      case DeviceStatus.expired: return const Color(0xFFF5F3FF);
+    }
+  }
 }
 
-// ── Theme ─────────────────────────────────────────────────────────────────────
 class AppTheme {
-  static ThemeData get dark => ThemeData(
+  static ThemeData get theme => ThemeData(
     useMaterial3: true,
-    brightness: Brightness.dark,
     fontFamily: 'Inter',
-    scaffoldBackgroundColor: AC.bg,
-    colorScheme: const ColorScheme.dark(
-      primary: AC.blue, secondary: AC.cyan,
-      surface: AC.surface, error: AC.red,
+    colorScheme: ColorScheme.fromSeed(
+      seedColor: AppColors.primary,
+      brightness: Brightness.light,
+      surface: AppColors.surface,
     ),
+    scaffoldBackgroundColor: AppColors.background,
     appBarTheme: const AppBarTheme(
-      backgroundColor: AC.surface,
-      foregroundColor: AC.text1,
-      elevation: 0, scrolledUnderElevation: 0,
+      backgroundColor: AppColors.surface,
+      foregroundColor: AppColors.text1,
+      elevation: 0,
+      scrolledUnderElevation: 0,
       centerTitle: false,
-      titleTextStyle: TextStyle(fontSize: 22, fontWeight: FontWeight.w800,
-        color: AC.text1, fontFamily: 'Inter'),
-      systemOverlayStyle: SystemUiOverlayStyle(
-        statusBarColor: Colors.transparent,
-        statusBarIconBrightness: Brightness.light),
+      titleTextStyle: TextStyle(
+        fontSize: 20, fontWeight: FontWeight.w800,
+        color: AppColors.text1, fontFamily: 'Inter',
+      ),
+      systemOverlayStyle: SystemUiOverlayStyle.dark,
     ),
     cardTheme: CardThemeData(
-      color: AC.card, elevation: 0,
+      color: AppColors.card,
+      elevation: 0,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
     ),
-    dividerTheme: const DividerThemeData(color: Color(0xFF1E2A40), thickness: 1),
-    bottomNavigationBarTheme: const BottomNavigationBarThemeData(
-      backgroundColor: AC.surface,
-      selectedItemColor: AC.blue,
-      unselectedItemColor: AC.text3,
-      type: BottomNavigationBarType.fixed,
-      elevation: 0,
-      selectedLabelStyle: TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
-      unselectedLabelStyle: TextStyle(fontSize: 11, fontWeight: FontWeight.w500),
-    ),
     inputDecorationTheme: InputDecorationTheme(
-      filled: true, fillColor: AC.surface2,
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: AC.blue, width: 1.5)),
-      hintStyle: const TextStyle(color: AC.text3, fontSize: 14),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+      filled: true,
+      fillColor: AppColors.background,
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: BorderSide.none,
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: const BorderSide(color: AppColors.primary, width: 1.5),
+      ),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
     ),
     elevatedButtonTheme: ElevatedButtonThemeData(
       style: ElevatedButton.styleFrom(
-        backgroundColor: AC.blue, foregroundColor: Colors.white,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        padding: const EdgeInsets.symmetric(vertical: 15),
-        textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800),
+        backgroundColor: AppColors.primary,
+        foregroundColor: Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        padding: const EdgeInsets.symmetric(vertical: 16),
+        textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, fontFamily: 'Inter'),
         elevation: 0,
       ),
     ),
-    switchTheme: SwitchThemeData(
-      thumbColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.selected) ? AC.blue : AC.text3),
-      trackColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.selected) ? AC.blue.withOpacity(0.4) : AC.surface3),
-    ),
-  );
-
-  static ThemeData get light => ThemeData(
-    useMaterial3: true, brightness: Brightness.light, fontFamily: 'Inter',
-    scaffoldBackgroundColor: const Color(0xFFF4F6FA),
-    colorScheme: const ColorScheme.light(primary: AC.blue, secondary: AC.cyan),
-    appBarTheme: const AppBarTheme(
-      backgroundColor: Colors.white, foregroundColor: Color(0xFF0F172A),
-      elevation: 0, scrolledUnderElevation: 0, centerTitle: false,
-      titleTextStyle: TextStyle(fontSize: 22, fontWeight: FontWeight.w800,
-        color: Color(0xFF0F172A), fontFamily: 'Inter'),
-      systemOverlayStyle: SystemUiOverlayStyle(
-        statusBarColor: Colors.transparent, statusBarIconBrightness: Brightness.dark),
-    ),
-    bottomNavigationBarTheme: const BottomNavigationBarThemeData(
-      backgroundColor: Colors.white, selectedItemColor: AC.blue,
-      unselectedItemColor: Color(0xFF94A3B8), type: BottomNavigationBarType.fixed, elevation: 0,
-      selectedLabelStyle: TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
-      unselectedLabelStyle: TextStyle(fontSize: 11, fontWeight: FontWeight.w500),
-    ),
-    inputDecorationTheme: InputDecorationTheme(
-      filled: true, fillColor: const Color(0xFFF1F5F9),
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: AC.blue, width: 1.5)),
-      hintStyle: const TextStyle(color: Color(0xFF94A3B8), fontSize: 14),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
-    ),
-    elevatedButtonTheme: ElevatedButtonThemeData(
-      style: ElevatedButton.styleFrom(
-        backgroundColor: AC.blue, foregroundColor: Colors.white,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        padding: const EdgeInsets.symmetric(vertical: 15),
-        textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800), elevation: 0,
-      ),
-    ),
+    pageTransitionsTheme: const PageTransitionsTheme(builders: {
+      TargetPlatform.android: CupertinoPageTransitionsBuilder(),
+      TargetPlatform.iOS:     CupertinoPageTransitionsBuilder(),
+    }),
   );
 }
 
-// ── Formatters ────────────────────────────────────────────────────────────────
+// ── Formatters ──────────────────────────────────────────────────────────────
 String fmtDateTime(DateTime? dt) {
   if (dt == null) return '—';
   final l = dt.toLocal();
-  final h = l.hour, ap = h >= 12 ? 'PM' : 'AM', h12 = h % 12 == 0 ? 12 : h % 12;
-  return '${l.day.toString().padLeft(2,'0')}-${l.month.toString().padLeft(2,'0')}-${l.year} '
-    '${h12.toString().padLeft(2,'0')}:${l.minute.toString().padLeft(2,'0')}:${l.second.toString().padLeft(2,'0')} $ap';
+  final d  = l.day.toString().padLeft(2,'0');
+  final mo = l.month.toString().padLeft(2,'0');
+  final h  = l.hour % 12 == 0 ? 12 : l.hour % 12;
+  final mi = l.minute.toString().padLeft(2,'0');
+  final s  = l.second.toString().padLeft(2,'0');
+  final ap = l.hour >= 12 ? 'PM' : 'AM';
+  return '${l.year}/$mo/$d ${h.toString().padLeft(2,'0')}:$mi:$s $ap';
+}
+
+String fmtDateShort(DateTime? dt) {
+  if (dt == null) return '—';
+  final l = dt.toLocal();
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return '${l.day} ${months[l.month-1]} ${l.year}';
 }
 
 String fmtTimeOnly(DateTime? dt) {
   if (dt == null) return '—';
   final l = dt.toLocal();
-  final h = l.hour, ap = h >= 12 ? 'PM' : 'AM', h12 = h % 12 == 0 ? 12 : h % 12;
-  return '${h12.toString().padLeft(2,'0')}:${l.minute.toString().padLeft(2,'0')}:${l.second.toString().padLeft(2,'0')} $ap';
+  final h  = l.hour % 12 == 0 ? 12 : l.hour % 12;
+  final mi = l.minute.toString().padLeft(2,'0');
+  final s  = l.second.toString().padLeft(2,'0');
+  final ap = l.hour >= 12 ? 'PM' : 'AM';
+  return '${h.toString().padLeft(2,'0')}:$mi:$s $ap';
 }
 
 String timeAgo(DateTime? dt) {
   if (dt == null) return '—';
-  final d = DateTime.now().difference(dt);
-  if (d.inSeconds < 60)  return '${d.inSeconds}s ago';
-  if (d.inMinutes < 60)  return '${d.inMinutes}m ago';
-  if (d.inHours < 24)    return '${d.inHours}h ago';
-  return '${d.inDays}d ago';
+  final diff = DateTime.now().difference(dt);
+  if (diff.inSeconds < 60)  return '${diff.inSeconds}s ago';
+  if (diff.inMinutes < 60)  return '${diff.inMinutes} min ago';
+  if (diff.inHours < 24)    return '${diff.inHours}h ago';
+  return '${diff.inDays}d ago';
 }
 
 String stoppedFor(DateTime? dt) {
   if (dt == null) return '';
-  final d = DateTime.now().difference(dt);
-  return '${d.inHours} hr ${d.inMinutes % 60} min ${d.inSeconds % 60} sec';
+  final diff = DateTime.now().difference(dt);
+  final h = diff.inHours;
+  final m = diff.inMinutes % 60;
+  final s = diff.inSeconds % 60;
+  if (h > 0) return '${h}h ${m}m';
+  if (m > 0) return '${m}m ${s}s';
+  return '${s}s';
 }
 
 String fmtDuration(int ms) {
-  final s = ms ~/ 1000, h = s ~/ 3600, m = (s % 3600) ~/ 60, sec = s % 60;
-  if (h > 0) return '${h}h ${m}min ${sec}s';
-  if (m > 0) return '${m}min ${sec}s';
+  final s   = ms ~/ 1000;
+  final h   = s ~/ 3600;
+  final min = (s % 3600) ~/ 60;
+  final sec = s % 60;
+  if (h > 0)   return '${h}h ${min}m ${sec}s';
+  if (min > 0) return '${min}m ${sec}s';
   return '${sec}s';
 }
 
-String fmtKm(double m) => '${(m / 1000).toStringAsFixed(1)} km';
-String fmtKmFull(double m) => '${(m / 1000).toStringAsFixed(2)} km';
+String fmtKm(double meters) => '${(meters / 1000).toStringAsFixed(1)} km';
 
 Map<String, dynamic> eventMeta(String type) {
-  const m = {
-    'deviceOverspeed':  {'icon': Icons.speed,              'color': 0xFFFF1744, 'bg': 0x22FF1744, 'label': 'Overspeed'},
-    'geofenceEnter':    {'icon': Icons.login,              'color': 0xFF00C853, 'bg': 0x2200C853, 'label': 'Entered Zone'},
-    'geofenceExit':     {'icon': Icons.logout,             'color': 0xFFFFAB00, 'bg': 0x22FFAB00, 'label': 'Exited Zone'},
-    'geofenceStay':     {'icon': Icons.location_on,        'color': 0xFFFFAB00, 'bg': 0x22FFAB00, 'label': 'Zone Stay'},
-    'ignitionOn':       {'icon': Icons.power,              'color': 0xFF00C853, 'bg': 0x2200C853, 'label': 'Ignition ON'},
-    'ignitionOff':      {'icon': Icons.power_off,          'color': 0xFF607D8B, 'bg': 0x22607D8B, 'label': 'Ignition OFF'},
-    'deviceOnline':     {'icon': Icons.wifi,               'color': 0xFF00C853, 'bg': 0x2200C853, 'label': 'Device Online'},
-    'deviceOffline':    {'icon': Icons.wifi_off,           'color': 0xFFFF1744, 'bg': 0x22FF1744, 'label': 'Device Offline'},
-    'alarm':            {'icon': Icons.warning_amber,      'color': 0xFFFF1744, 'bg': 0x22FF1744, 'label': 'Alarm'},
-    'deviceStopped':    {'icon': Icons.stop_circle,        'color': 0xFFFF1744, 'bg': 0x22FF1744, 'label': 'Vehicle Stopped'},
-    'deviceMoving':     {'icon': Icons.directions_car,     'color': 0xFF00C853, 'bg': 0x2200C853, 'label': 'Vehicle Moving'},
-    'deviceInactive':   {'icon': Icons.bedtime,            'color': 0xFF607D8B, 'bg': 0x22607D8B, 'label': 'Inactive'},
-    'driverChanged':    {'icon': Icons.person,             'color': 0xFF2196F3, 'bg': 0x222196F3, 'label': 'Driver Changed'},
-    'deviceOverspeedEnd':{'icon': Icons.check_circle,      'color': 0xFF00C853, 'bg': 0x2200C853, 'label': 'Speed Normal'},
-    'deviceExcessIdle': {'icon': Icons.timer_off,          'color': 0xFFFFAB00, 'bg': 0x22FFAB00, 'label': 'Excess Idle'},
+  const map = {
+    'deviceOverspeed':  {'icon': Icons.speed,                  'color': 0xFFD97706, 'bg': 0xFFFEF3C7, 'label': 'Overspeed'},
+    'geofenceEnter':    {'icon': Icons.location_on,            'color': 0xFF7C3AED, 'bg': 0xFFF5F3FF, 'label': 'Zone Entry'},
+    'geofenceExit':     {'icon': Icons.logout,                 'color': 0xFF7C3AED, 'bg': 0xFFF5F3FF, 'label': 'Zone Exit'},
+    'ignitionOn':       {'icon': Icons.vpn_key_rounded,        'color': 0xFF16A34A, 'bg': 0xFFDCFCE7, 'label': 'Engine ON'},
+    'ignitionOff':      {'icon': Icons.vpn_key_off_rounded,    'color': 0xFF64748B, 'bg': 0xFFF1F5F9, 'label': 'Engine OFF'},
+    'deviceOnline':     {'icon': Icons.wifi,                   'color': 0xFF16A34A, 'bg': 0xFFDCFCE7, 'label': 'Online'},
+    'deviceOffline':    {'icon': Icons.wifi_off,               'color': 0xFFDC2626, 'bg': 0xFFFEE2E2, 'label': 'Offline'},
+    'alarm':            {'icon': Icons.warning_amber_rounded,  'color': 0xFFDC2626, 'bg': 0xFFFEE2E2, 'label': 'Alarm'},
+    'deviceStopped':    {'icon': Icons.stop_circle_outlined,   'color': 0xFFDC2626, 'bg': 0xFFFEE2E2, 'label': 'Vehicle Stopped'},
+    'deviceMoving':     {'icon': Icons.directions_car_rounded, 'color': 0xFF1A73E8, 'bg': 0xFFDBEAFE, 'label': 'Vehicle Moving'},
+    'deviceInactive':   {'icon': Icons.bedtime_rounded,        'color': 0xFF64748B, 'bg': 0xFFF1F5F9, 'label': 'Inactive'},
+    'hardBraking':      {'icon': Icons.pan_tool_rounded,       'color': 0xFFDC2626, 'bg': 0xFFFEE2E2, 'label': 'Hard Braking'},
+    'hardAcceleration': {'icon': Icons.flash_on_rounded,       'color': 0xFFD97706, 'bg': 0xFFFEF3C7, 'label': 'Hard Acceleration'},
+    'hardCornering':    {'icon': Icons.rotate_right_rounded,   'color': 0xFFD97706, 'bg': 0xFFFEF3C7, 'label': 'Hard Cornering'},
+    'lowBattery':       {'icon': Icons.battery_alert_rounded,  'color': 0xFFDC2626, 'bg': 0xFFFEE2E2, 'label': 'Low Battery'},
+    'powerCut':         {'icon': Icons.power_off_rounded,      'color': 0xFFDC2626, 'bg': 0xFFFEE2E2, 'label': 'Power Cut'},
   };
-  return (m[type] as Map<String, dynamic>?) ??
-    {'icon': Icons.info_outline, 'color': 0xFF607D8B, 'bg': 0x22607D8B,
-     'label': type.replaceAllMapped(RegExp(r'([A-Z])'), (x) => ' ${x[0]}').trim()};
+  return map[type] ?? {'icon': Icons.notifications_rounded, 'color': 0xFFD97706, 'bg': 0xFFFEF3C7, 'label': type};
 }

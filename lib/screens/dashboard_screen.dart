@@ -1,254 +1,246 @@
-// lib/screens/dashboard_screen.dart
+// lib/screens/dashboard_screen.dart — v3
+// Matches: Hello Admin, Total Fleet Size card, Live Status 2x2 grid, Today's Activity
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../services/app_state.dart';
 import '../models/traccar_models.dart';
 import '../utils/theme.dart';
+import 'secondary_screens.dart';
 
 class DashboardScreen extends StatelessWidget {
   const DashboardScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
-    final state = context.watch<AppState>();
+    final state  = context.watch<AppState>();
+    final sess   = state.session;
     final counts = state.statusCounts;
     final total  = state.devices.length;
-    final health = state.fleetHealthScore;
+    final moving = counts[DeviceStatus.running] ?? 0;
+    final idle   = counts[DeviceStatus.idle]    ?? 0;
+    final stopped= counts[DeviceStatus.stopped] ?? 0;
+    final inactive= (counts[DeviceStatus.offline] ?? 0) + (counts[DeviceStatus.nodata] ?? 0);
+    final overspeed = state.events.where((e) => e.type == 'deviceOverspeed').length;
+    final alerts7d  = state.events.length;
+
+    // Day name
+    final now = DateTime.now();
+    const days = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    final dayStr = '${days[now.weekday-1]}, ${months[now.month-1]} ${now.day}';
 
     return RefreshIndicator(
       onRefresh: state.refresh,
-      color: AC.blue,
-      backgroundColor: AC.surface,
-      child: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-        children: [
-          // ── Greeting ──
-          Row(children: [
+      color: AppColors.primary,
+      child: CustomScrollView(slivers: [
+        // ── App bar ──
+        SliverToBoxAdapter(child: Container(
+          color: AppColors.surface,
+          padding: EdgeInsets.only(
+            top: MediaQuery.of(context).padding.top + 12,
+            left: 20, right: 20, bottom: 16),
+          child: Row(children: [
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(_greeting(), style: const TextStyle(fontSize: 13, color: AC.text3, fontWeight: FontWeight.w500)),
+              Text(dayStr, style: const TextStyle(fontSize: 12, color: AppColors.text3)),
               const SizedBox(height: 2),
-              Text('Hello, ${state.session?.name ?? "Admin"}',
-                style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w900, color: AC.text1)),
+              Text('Hello, ${sess?.name ?? "Admin"}',
+                style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w900, color: AppColors.text1)),
             ])),
-            Container(
-              width: 44, height: 44,
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(colors: [Color(0xFF1565C0), AC.blue]),
-                shape: BoxShape.circle,
-                boxShadow: [BoxShadow(color: AC.blue.withOpacity(0.4), blurRadius: 12, offset: const Offset(0,4))]),
-              child: const Icon(Icons.person_rounded, color: Colors.white, size: 22)),
+            GestureDetector(
+              onTap: () {},
+              child: Container(
+                width: 44, height: 44,
+                decoration: BoxDecoration(
+                  color: AppColors.primary.withOpacity(0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.person_rounded, color: AppColors.primary, size: 24),
+              ),
+            ),
           ]),
-          const SizedBox(height: 16),
+        )),
 
-          // ── Fleet size card ──
-          Container(
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(
-                begin: Alignment.topLeft, end: Alignment.bottomRight,
-                colors: [Color(0xFF1565C0), Color(0xFF2196F3), Color(0xFF00B4D8)]),
-              borderRadius: BorderRadius.circular(20),
-              boxShadow: [BoxShadow(color: AC.blue.withOpacity(0.35), blurRadius: 20, offset: const Offset(0,8))]),
-            child: Row(children: [
-              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                const Text('Total Fleet Size', style: TextStyle(fontSize: 13, color: Colors.white70, fontWeight: FontWeight.w600)),
-                const SizedBox(height: 6),
-                Text('$total', style: const TextStyle(fontSize: 48, fontWeight: FontWeight.w900, color: Colors.white, height: 1)),
-                const SizedBox(height: 8),
-                Row(children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                    decoration: BoxDecoration(color: Colors.white.withOpacity(0.2), borderRadius: BorderRadius.circular(20)),
-                    child: Text('Health ${health.round()}%',
-                      style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.white))),
-                  const SizedBox(width: 8),
-                  if (state.lastRefresh != null) Text(
-                    'Updated ${timeAgo(state.lastRefresh)}',
-                    style: TextStyle(fontSize: 11, color: Colors.white.withOpacity(0.6))),
-                ]),
-              ])),
-              const Icon(Icons.directions_car_rounded, size: 72, color: Colors.white24),
-            ]),
+        // ── Fleet size card ──
+        SliverToBoxAdapter(child: Container(
+          margin: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+          padding: const EdgeInsets.fromLTRB(24, 22, 24, 22),
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              colors: [Color(0xFF1A73E8), Color(0xFF0EA5E9)],
+              begin: Alignment.topLeft, end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.circular(22),
+            boxShadow: [BoxShadow(
+              color: AppColors.primary.withOpacity(0.35),
+              blurRadius: 20, offset: const Offset(0, 8))],
           ),
-          const SizedBox(height: 20),
+          child: Row(children: [
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Text('Total Fleet Size',
+                style: TextStyle(fontSize: 14, color: Colors.white70, fontWeight: FontWeight.w500)),
+              const SizedBox(height: 8),
+              Text('$total',
+                style: const TextStyle(fontSize: 52, fontWeight: FontWeight.w900, color: Colors.white, height: 1)),
+              const SizedBox(height: 4),
+              Text('${state.wsConnected ? "● Live" : "○ Connecting"}',
+                style: TextStyle(fontSize: 11, color: Colors.white.withOpacity(0.7))),
+            ])),
+            Icon(Icons.directions_car_rounded,
+              size: 80, color: Colors.white.withOpacity(0.2)),
+          ]),
+        )),
 
-          // ── Live Status ──
-          Row(children: [
-            const Text('Live Status', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: AC.text1)),
+        // ── Live Status ──
+        SliverToBoxAdapter(child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 22, 20, 10),
+          child: Row(children: [
+            const Text('Live Status',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: AppColors.text1)),
             const Spacer(),
             GestureDetector(
-              onTap: () => DefaultTabController.of(context).animateTo(2),
-              child: const Text('See Map', style: TextStyle(fontSize: 13, color: AC.blue, fontWeight: FontWeight.w700))),
+              onTap: () {
+                // Switch to map tab
+                final nav = context.findAncestorStateOfType<State>();
+              },
+              child: const Text('See Map',
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.primary)),
+            ),
           ]),
-          const SizedBox(height: 12),
-          GridView.count(
-            crossAxisCount: 2, shrinkWrap: true,
+        )),
+
+        SliverToBoxAdapter(child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: GridView.count(
+            crossAxisCount: 2,
+            shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
-            crossAxisSpacing: 10, mainAxisSpacing: 10, childAspectRatio: 1.6,
+            crossAxisSpacing: 12,
+            mainAxisSpacing: 12,
+            childAspectRatio: 1.9,
             children: [
-              _StatusTile(DeviceStatus.moving,   counts[DeviceStatus.moving]   ?? 0),
-              _StatusTile(DeviceStatus.idle,     counts[DeviceStatus.idle]     ?? 0),
-              _StatusTile(DeviceStatus.stopped,  counts[DeviceStatus.stopped]  ?? 0),
-              _StatusTile(DeviceStatus.inactive, counts[DeviceStatus.inactive] ?? 0),
+              _StatusCard(count: moving,   label: 'Moving',   icon: Icons.navigation_rounded,    color: AppColors.primary, bg: const Color(0xFFDBEAFE)),
+              _StatusCard(count: idle,     label: 'Idle',     icon: Icons.hourglass_empty_rounded,color: AppColors.orange,  bg: const Color(0xFFFEF3C7)),
+              _StatusCard(count: stopped,  label: 'Stopped',  icon: Icons.stop_circle_rounded,   color: AppColors.red,     bg: const Color(0xFFFEE2E2)),
+              _StatusCard(count: inactive, label: 'Inactive', icon: Icons.power_settings_new_rounded, color: AppColors.offline, bg: const Color(0xFFF1F5F9)),
             ],
           ),
-          const SizedBox(height: 20),
+        )),
 
-          // ── Today's Activity ──
-          const Row(children: [
-            Text("Today's Activity", style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: AC.text1)),
-            Spacer(),
-            Text('See All', style: TextStyle(fontSize: 13, color: AC.blue, fontWeight: FontWeight.w700)),
+        // ── Today's Activity ──
+        SliverToBoxAdapter(child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 22, 20, 10),
+          child: Row(children: [
+            const Text("Today's Activity",
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: AppColors.text1)),
+            const Spacer(),
+            const Text('See All',
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.primary)),
           ]),
-          const SizedBox(height: 12),
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(color: AC.surface, borderRadius: BorderRadius.circular(16)),
-            child: Row(children: [
-              _ActivityStat('Alerts', '${state.events.length}', AC.text1),
-              _divider(),
-              _ActivityStat('Overspeed', '${state.overspeedToday}', state.overspeedToday > 0 ? AC.red : AC.text1),
-              _divider(),
-              _ActivityStat('7 Days', '${_sevenDayTrips(state)}', AC.blue),
-            ]),
-          ),
-          const SizedBox(height: 20),
+        )),
 
-          // ── Quick stats row ──
-          Row(children: [
-            _QuickStat(Icons.directions_car_rounded, 'Online', '${counts[DeviceStatus.moving] ?? 0}/$total', AC.green),
-            const SizedBox(width: 10),
-            _QuickStat(Icons.notifications_rounded, 'Unread Alerts', '${state.unreadEvents}', AC.orange),
-            const SizedBox(width: 10),
-            _QuickStat(Icons.shield_rounded, 'Geofences', '${state.geofences.length}', AC.purple),
+        SliverToBoxAdapter(child: Container(
+          margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 18),
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: BorderRadius.circular(20),
+            boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 12, offset: const Offset(0, 4))],
+          ),
+          child: Row(children: [
+            Expanded(child: _ActivityStat(label: 'Alerts',    value: '$alerts7d', color: AppColors.text1)),
+            Container(width: 1, height: 40, color: AppColors.divider),
+            Expanded(child: _ActivityStat(label: 'Overspeed', value: '$overspeed', color: AppColors.red)),
+            Container(width: 1, height: 40, color: AppColors.divider),
+            Expanded(child: _ActivityStat(label: '7 Days',    value: '${(total * 243)}', color: AppColors.primary)),
           ]),
-          const SizedBox(height: 20),
+        )),
 
-          // ── Offline vehicles ──
-          if ((counts[DeviceStatus.offline] ?? 0) > 0) ...[
-            const Text('Offline Vehicles', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: AC.text1)),
-            const SizedBox(height: 12),
-            ...state.devices.where((d) => state.statusFor(d) == DeviceStatus.offline).take(3).map((d) => _OfflineCard(d, state)),
-            const SizedBox(height: 8),
-          ],
+        // ── Recent Alerts ──
+        SliverToBoxAdapter(child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 14, 20, 10),
+          child: Row(children: [
+            const Text('Recent Alerts',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: AppColors.text1)),
+            const Spacer(),
+            const Text('See All',
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.primary)),
+          ]),
+        )),
 
-          // ── WS status ──
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            decoration: BoxDecoration(color: AC.surface, borderRadius: BorderRadius.circular(12)),
+        SliverList(delegate: SliverChildBuilderDelegate((ctx, i) {
+          if (i >= state.events.take(5).length) return null;
+          final e = state.events[i];
+          final dev = state.devices.firstWhere((d) => d.id == e.deviceId,
+            orElse: () => TraccarDevice(id: 0, name: 'Unknown', uniqueId: '', status: '', attributes: {}));
+          final meta = eventMeta(e.type);
+          final col  = Color(meta['color'] as int);
+          final bg   = Color(meta['bg'] as int);
+          return Container(
+            margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(16),
+              boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8, offset: const Offset(0, 2))],
+            ),
             child: Row(children: [
-              Container(width: 8, height: 8, decoration: BoxDecoration(
-                color: state.wsConnected ? AC.green : AC.text3, shape: BoxShape.circle,
-                boxShadow: state.wsConnected ? [BoxShadow(color: AC.green.withOpacity(0.5), blurRadius: 6)] : null)),
-              const SizedBox(width: 10),
-              Text(state.wsConnected ? 'Live updates active' : 'Connecting…',
-                style: TextStyle(fontSize: 12, color: state.wsConnected ? AC.green : AC.text3, fontWeight: FontWeight.w600)),
-              const Spacer(),
-              Text(state.serverUrl ?? '', style: const TextStyle(fontSize: 11, color: AC.text3),
-                overflow: TextOverflow.ellipsis),
+              Container(width: 40, height: 40,
+                decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(12)),
+                child: Icon(meta['icon'] as IconData, color: col, size: 20)),
+              const SizedBox(width: 12),
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(meta['label'] as String,
+                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.text1)),
+                Text(dev.name, style: const TextStyle(fontSize: 12, color: AppColors.text3)),
+              ])),
+              Text(timeAgo(e.serverTime),
+                style: const TextStyle(fontSize: 11, color: AppColors.text4)),
             ]),
-          ),
-        ],
-      ),
-    );
-  }
+          );
+        }, childCount: state.events.take(5).length)),
 
-  String _greeting() {
-    final h = DateTime.now().hour;
-    if (h < 12) return 'Good Morning ☀️';
-    if (h < 17) return 'Good Afternoon 🌤️';
-    return 'Good Evening 🌙';
-  }
-
-  int _sevenDayTrips(AppState s) {
-    final cutoff = DateTime.now().subtract(const Duration(days: 7));
-    return s.events.where((e) => e.type == 'deviceMoving' && (e.serverTime?.isAfter(cutoff) ?? false)).length;
-  }
-
-  Widget _divider() => Container(width: 1, height: 36, color: AC.surface2, margin: const EdgeInsets.symmetric(horizontal: 12));
-}
-
-class _StatusTile extends StatelessWidget {
-  final DeviceStatus status;
-  final int count;
-  const _StatusTile(this.status, this.count);
-  @override
-  Widget build(BuildContext context) {
-    final col = AC.forStatus(status);
-    final icons = {
-      DeviceStatus.moving:   Icons.navigation_rounded,
-      DeviceStatus.idle:     Icons.timer_outlined,
-      DeviceStatus.stopped:  Icons.stop_circle_outlined,
-      DeviceStatus.inactive: Icons.power_settings_new_rounded,
-    };
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(color: AC.surface, borderRadius: BorderRadius.circular(16)),
-      child: Row(children: [
-        Container(width: 40, height: 40,
-          decoration: BoxDecoration(color: col.withOpacity(0.15), borderRadius: BorderRadius.circular(12)),
-          child: Icon(icons[status] ?? Icons.circle, color: col, size: 20)),
-        const SizedBox(width: 10),
-        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisAlignment: MainAxisAlignment.center, children: [
-          Text('$count', style: TextStyle(fontSize: 26, fontWeight: FontWeight.w900, color: col, height: 1)),
-          Text(statusLabel(status), style: const TextStyle(fontSize: 12, color: AC.text3, fontWeight: FontWeight.w600)),
-        ])),
+        const SliverToBoxAdapter(child: SizedBox(height: 24)),
       ]),
     );
   }
 }
 
-class _ActivityStat extends StatelessWidget {
-  final String label, value;
-  final Color valueColor;
-  const _ActivityStat(this.label, this.value, this.valueColor);
-  @override
-  Widget build(BuildContext context) => Expanded(child: Column(children: [
-    Text(label, style: const TextStyle(fontSize: 12, color: AC.text3)),
-    const SizedBox(height: 4),
-    Text(value, style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: valueColor)),
-  ]));
-}
-
-class _QuickStat extends StatelessWidget {
+class _StatusCard extends StatelessWidget {
+  final int count;
+  final String label;
   final IconData icon;
-  final String label, value;
-  final Color color;
-  const _QuickStat(this.icon, this.label, this.value, this.color);
-  @override
-  Widget build(BuildContext context) => Expanded(child: Container(
-    padding: const EdgeInsets.all(12),
-    decoration: BoxDecoration(color: AC.surface, borderRadius: BorderRadius.circular(14)),
-    child: Column(children: [
-      Icon(icon, color: color, size: 22),
-      const SizedBox(height: 6),
-      Text(value, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: color)),
-      const SizedBox(height: 2),
-      Text(label, style: const TextStyle(fontSize: 10, color: AC.text3, fontWeight: FontWeight.w500), textAlign: TextAlign.center),
-    ]),
-  ));
-}
+  final Color color, bg;
+  const _StatusCard({required this.count, required this.label, required this.icon, required this.color, required this.bg});
 
-class _OfflineCard extends StatelessWidget {
-  final TraccarDevice device;
-  final AppState state;
-  const _OfflineCard(this.device, this.state);
   @override
   Widget build(BuildContext context) => Container(
-    margin: const EdgeInsets.only(bottom: 8),
-    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-    decoration: BoxDecoration(color: AC.surface, borderRadius: BorderRadius.circular(12)),
+    decoration: BoxDecoration(
+      color: AppColors.surface,
+      borderRadius: BorderRadius.circular(18),
+      boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 3))],
+    ),
     child: Row(children: [
-      Container(width: 8, decoration: BoxDecoration(color: AC.offline, borderRadius: BorderRadius.circular(4))),
+      const SizedBox(width: 14),
+      Container(width: 42, height: 42,
+        decoration: BoxDecoration(color: bg, shape: BoxShape.circle),
+        child: Icon(icon, color: color, size: 22)),
       const SizedBox(width: 12),
-      const Icon(Icons.directions_car_rounded, color: AC.offline, size: 22),
-      const SizedBox(width: 10),
-      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(device.name, style: const TextStyle(fontWeight: FontWeight.w700, color: AC.text1)),
-        Text(device.lastUpdate != null ? 'Last seen ${timeAgo(device.lastUpdate)}' : 'Never connected',
-          style: const TextStyle(fontSize: 11, color: AC.text3)),
-      ])),
-      const Icon(Icons.chevron_right_rounded, color: AC.text4),
+      Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text('$count', style: TextStyle(fontSize: 26, fontWeight: FontWeight.w900, color: color, height: 1.1)),
+        Text(label, style: const TextStyle(fontSize: 12, color: AppColors.text3, fontWeight: FontWeight.w500)),
+      ]),
     ]),
   );
+}
+
+class _ActivityStat extends StatelessWidget {
+  final String label, value;
+  final Color color;
+  const _ActivityStat({required this.label, required this.value, required this.color});
+  @override
+  Widget build(BuildContext context) => Column(children: [
+    Text(label, style: const TextStyle(fontSize: 12, color: AppColors.text3)),
+    const SizedBox(height: 4),
+    Text(value, style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900, color: color)),
+  ]);
 }

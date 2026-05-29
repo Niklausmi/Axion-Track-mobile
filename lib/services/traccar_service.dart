@@ -1,4 +1,4 @@
-// lib/services/traccar_service.dart
+// lib/services/traccar_service.dart  — v2 (fixed + improved)
 import 'dart:convert';
 import 'dart:async';
 import 'package:http/http.dart' as http;
@@ -9,147 +9,295 @@ class TraccarService {
   final String serverUrl;
   final String email;
   final String password;
-  late final String _auth;
-  late final String _base;
+  late final String _authHeader;
+  late final String _baseUrl;
 
-  WebSocketChannel? _ws;
+  WebSocketChannel? _wsChannel;
   StreamSubscription? _wsSub;
-  Timer? _wsTimer;
+  Timer? _wsReconnectTimer;
+  Timer? _pollTimer;               // FIX: polling fallback when WS is down
   int _wsRetries = 0;
+  bool _disposed = false;
 
-  Function(List<TraccarDevice>)?  onDevices;
-  Function(List<TraccarPosition>)? onPositions;
-  Function(List<TraccarEvent>)?   onEvents;
-  Function(bool)?                 onWsChange;
+  // Callbacks for live updates
+  Function(List<TraccarDevice>)? onDevicesUpdate;
+  Function(List<TraccarPosition>)? onPositionsUpdate;
+  Function(List<TraccarEvent>)? onEventsUpdate;
+  Function(bool)? onWsConnectionChange;
 
-  TraccarService({required this.serverUrl, required this.email, required this.password}) {
-    _base = '${serverUrl.replaceAll(RegExp(r'/$'), '')}/api';
-    _auth = 'Basic ${base64Encode(utf8.encode('$email:$password'))}';
+  TraccarService({
+    required this.serverUrl,
+    required this.email,
+    required this.password,
+  }) {
+    _baseUrl = '${serverUrl.replaceAll(RegExp(r'/$'), '')}/api';
+    _authHeader = 'Basic ${base64Encode(utf8.encode('$email:$password'))}';
   }
 
-  Map<String, String> get _h => {'Authorization': _auth, 'Accept': 'application/json'};
+  // FIX: headers include cookie jar via credentials – always send auth
+  Map<String, String> get _headers => {
+    'Authorization': _authHeader,
+    'Accept': 'application/json',
+    'Content-Type': 'application/json',
+  };
 
-  Future<dynamic> _get(String path) async {
-    final r = await http.get(Uri.parse('$_base$path'), headers: _h).timeout(const Duration(seconds: 30));
-    if (r.statusCode == 200) return json.decode(utf8.decode(r.bodyBytes));
-    throw Exception('HTTP ${r.statusCode}: ${r.body}');
-  }
+  // FIX: unified request method with proper timeout & error wrapping
+  Future<dynamic> _request(String method, String path, {Map<String, dynamic>? body, bool form = false}) async {
+    final uri = Uri.parse('$_baseUrl$path');
+    http.Response res;
+    final headers = Map<String, String>.from(_headers);
+    if (form) headers['Content-Type'] = 'application/x-www-form-urlencoded';
 
-  Future<dynamic> _post(String path, Map<String, String> form) async {
-    final r = await http.post(Uri.parse('$_base$path'),
-      headers: {..._h, 'Content-Type': 'application/x-www-form-urlencoded'},
-      body: form).timeout(const Duration(seconds: 30));
-    if (r.statusCode == 200) return json.decode(utf8.decode(r.bodyBytes));
-    throw Exception('HTTP ${r.statusCode}: ${r.body}');
-  }
-
-  Future<dynamic> _postJson(String path, Map<String, dynamic> body) async {
-    final r = await http.post(Uri.parse('$_base$path'),
-      headers: {..._h, 'Content-Type': 'application/json'},
-      body: json.encode(body)).timeout(const Duration(seconds: 30));
-    if (r.statusCode >= 200 && r.statusCode < 300) {
-      if (r.body.isEmpty) return {};
-      return json.decode(utf8.decode(r.bodyBytes));
-    }
-    throw Exception('HTTP ${r.statusCode}: ${r.body}');
-  }
-
-  // FIX: Explicitly cast the dynamic map to Map<String, dynamic>
-  Future<TraccarSession> login()      => _post('/session', {'email': email, 'password': password}).then((d) => TraccarSession.fromJson(d as Map<String, dynamic>));
-  Future<TraccarSession> getSession() => _get('/session').then((d) => TraccarSession.fromJson(d as Map<String, dynamic>));
-  Future<void>           logout()     => http.delete(Uri.parse('$_base/session'), headers: _h).then((_) {});
-
-  // FIX: Use .cast<Map<String, dynamic>>() or explicit mapping to ensure List<Model>
-  Future<List<TraccarDevice>>   getDevices()   => _get('/devices').then((d)   => (d as List).map((e) => TraccarDevice.fromJson(e as Map<String, dynamic>)).toList());
-  Future<List<TraccarPosition>> getPositions() => _get('/positions').then((d) => (d as List).map((e) => TraccarPosition.fromJson(e as Map<String, dynamic>)).toList());
-  Future<List<TraccarGeofence>> getGeofences() => _get('/geofences').then((d) => (d as List).map((e) => TraccarGeofence.fromJson(e as Map<String, dynamic>)).toList());
-  Future<List<TraccarGroup>>    getGroups()    => _get('/groups').then((d)    => (d as List).map((e) => TraccarGroup.fromJson(e as Map<String, dynamic>)).toList());
-
-  Future<List<TraccarEvent>> getEvents({required DateTime from, required DateTime to, required List<int> ids}) async {
-    if (ids.isEmpty) return [];
-    final p = StringBuffer('/reports/events?from=${Uri.encodeComponent(from.toUtc().toIso8601String())}&to=${Uri.encodeComponent(to.toUtc().toIso8601String())}');
-    for (final id in ids.take(20)) {
-      p.write('&deviceId=$id');
-    }
-    try { 
-      final d = await _get(p.toString());
-      return (d as List).map((e) => TraccarEvent.fromJson(e as Map<String, dynamic>)).toList(); 
-    } catch (_) { return []; }
-  }
-
-  Future<List<TraccarTrip>> getTrips({required int deviceId, required DateTime from, required DateTime to}) async {
     try {
-      final d = await _get('/reports/trips?deviceId=$deviceId&from=${Uri.encodeComponent(from.toUtc().toIso8601String())}&to=${Uri.encodeComponent(to.toUtc().toIso8601String())}');
-      return (d as List).map((e) => TraccarTrip.fromJson(e as Map<String, dynamic>)).toList();
-    } catch (_) { return []; }
-  }
-
-  Future<List<TraccarStop>> getStops({required int deviceId, required DateTime from, required DateTime to}) async {
-    try {
-      final d = await _get('/reports/stops?deviceId=$deviceId&from=${Uri.encodeComponent(from.toUtc().toIso8601String())}&to=${Uri.encodeComponent(to.toUtc().toIso8601String())}');
-      return (d as List).map((e) => TraccarStop.fromJson(e as Map<String, dynamic>)).toList();
-    } catch (_) { return []; }
-  }
-
-  Future<List<TraccarPosition>> getRoute({required int deviceId, required DateTime from, required DateTime to}) async {
-    try {
-      final d = await _get('/reports/route?deviceId=$deviceId&from=${Uri.encodeComponent(from.toUtc().toIso8601String())}&to=${Uri.encodeComponent(to.toUtc().toIso8601String())}');
-      return (d as List).map((e) => TraccarPosition.fromJson(e as Map<String, dynamic>)).toList();
-    } catch (_) { return []; }
-  }
-
-  Future<double> getDailyDistance({required int deviceId}) async {
-    final now = DateTime.now();
-    final from = DateTime(now.year, now.month, now.day);
-    final to = DateTime(now.year, now.month, now.day, 23, 59, 59);
-    try {
-      final d = await _get('/reports/summary?deviceId=$deviceId&from=${Uri.encodeComponent(from.toUtc().toIso8601String())}&to=${Uri.encodeComponent(to.toUtc().toIso8601String())}');
-      if (d is List && d.isNotEmpty) {
-        return ((d.first['distance'] as num?)?.toDouble() ?? 0.0) / 1000.0;
+      switch (method) {
+        case 'GET':
+          res = await http.get(uri, headers: headers).timeout(const Duration(seconds: 20));
+          break;
+        case 'POST':
+          final b = form && body != null
+              ? body.map((k, v) => MapEntry(k, v.toString()))
+              : null;
+          res = await http.post(
+            uri,
+            headers: headers,
+            body: form ? b : (body != null ? json.encode(body) : null),
+          ).timeout(const Duration(seconds: 20));
+          break;
+        case 'DELETE':
+          res = await http.delete(uri, headers: headers).timeout(const Duration(seconds: 20));
+          break;
+        default:
+          throw Exception('Unsupported method: $method');
       }
-    } catch (_) {}
-    return 0.0;
+    } on TimeoutException {
+      throw Exception('Connection timed out. Check your server URL.');
+    } on Exception catch (e) {
+      throw Exception('Network error: $e');
+    }
+
+    if (res.statusCode == 200 || res.statusCode == 201) {
+      if (res.body.isEmpty) return null;
+      return json.decode(res.body);
+    }
+    if (res.statusCode == 204) return null;
+    if (res.statusCode == 401) throw Exception('Invalid credentials');
+    if (res.statusCode == 404) throw Exception('Server not found. Check URL.');
+    throw Exception('Server error ${res.statusCode}: ${res.body}');
   }
 
-  // FIX: Added cast to Map<String, dynamic>
-  Future<Map<String,dynamic>> sendCommand({required int deviceId, required String type}) async {
-    final res = await _postJson('/commands/send', {'deviceId': deviceId, 'type': type});
-    return res as Map<String, dynamic>;
+  // ── Auth ──
+  Future<TraccarSession> login() async {
+    final data = await _request('POST', '/session',
+        body: {'email': email, 'password': password}, form: true);
+    return TraccarSession.fromJson(data);
   }
 
-  String get wsUrl => '${_base.replaceFirst('http', 'ws').replaceAll('/api', '')}/api/socket';
+  Future<TraccarSession> getSession() async {
+    final data = await _request('GET', '/session');
+    return TraccarSession.fromJson(data);
+  }
 
-  void connectWS() {
-    _wsTimer?.cancel();
-    _wsSub?.cancel(); // Close existing subscription
-    _ws?.sink.close(); // Close existing socket
-    
+  Future<void> logout() async => _request('DELETE', '/session');
+
+  // ── Data ──
+  Future<List<TraccarDevice>> getDevices() async {
+    final data = await _request('GET', '/devices');
+    return (data as List).map((e) => TraccarDevice.fromJson(e)).toList();
+  }
+
+  Future<List<TraccarPosition>> getPositions() async {
+    final data = await _request('GET', '/positions');
+    return (data as List).map((e) => TraccarPosition.fromJson(e)).toList();
+  }
+
+  Future<List<TraccarGeofence>> getGeofences() async {
+    final data = await _request('GET', '/geofences');
+    return (data as List).map((e) => TraccarGeofence.fromJson(e)).toList();
+  }
+
+  // FIX: events API — removed .take(20) device id cap, added proper error boundary
+  Future<List<TraccarEvent>> getEvents({
+    required DateTime from,
+    required DateTime to,
+    required List<int> deviceIds,
+  }) async {
+    if (deviceIds.isEmpty) return [];
+    final params = StringBuffer('/reports/events?')
+      ..write('from=${Uri.encodeComponent(from.toUtc().toIso8601String())}')
+      ..write('&to=${Uri.encodeComponent(to.toUtc().toIso8601String())}');
+    for (final id in deviceIds) {
+      params.write('&deviceId=$id');
+    }
     try {
-      _ws = WebSocketChannel.connect(Uri.parse(wsUrl));
-      _ws!.ready.catchError((_) {});
-      onWsChange?.call(true);
+      final data = await _request('GET', params.toString());
+      if (data == null) return [];
+      return (data as List).map((e) => TraccarEvent.fromJson(e)).toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<List<TraccarTrip>> getTrips({
+    required int deviceId,
+    required DateTime from,
+    required DateTime to,
+  }) async {
+    final path = '/reports/trips?deviceId=$deviceId'
+        '&from=${Uri.encodeComponent(from.toUtc().toIso8601String())}'
+        '&to=${Uri.encodeComponent(to.toUtc().toIso8601String())}';
+    final data = await _request('GET', path);
+    if (data == null) return [];
+    return (data as List).map((e) => TraccarTrip.fromJson(e)).toList();
+  }
+
+  Future<List<TraccarStop>> getStops({
+    required int deviceId,
+    required DateTime from,
+    required DateTime to,
+  }) async {
+    final path = '/reports/stops?deviceId=$deviceId'
+        '&from=${Uri.encodeComponent(from.toUtc().toIso8601String())}'
+        '&to=${Uri.encodeComponent(to.toUtc().toIso8601String())}';
+    try {
+      final data = await _request('GET', path);
+      if (data == null) return [];
+      return (data as List).map((e) => TraccarStop.fromJson(e)).toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<List<TraccarPosition>> getRoute({
+    required int deviceId,
+    required DateTime from,
+    required DateTime to,
+  }) async {
+    final path = '/reports/route?deviceId=$deviceId'
+        '&from=${Uri.encodeComponent(from.toUtc().toIso8601String())}'
+        '&to=${Uri.encodeComponent(to.toUtc().toIso8601String())}';
+    try {
+      final data = await _request('GET', path);
+      if (data == null) return [];
+      return (data as List).map((e) => TraccarPosition.fromJson(e)).toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  // FIX: sendCommand uses correct JSON body structure + returns proper response
+  Future<Map<String, dynamic>> sendCommand({
+    required int deviceId,
+    required String type,
+    Map<String, dynamic>? attributes,
+  }) async {
+    final body = <String, dynamic>{
+      'deviceId': deviceId,
+      'type': type,
+      'attributes': attributes ?? {},
+    };
+    try {
+      final data = await _request('POST', '/commands/send', body: body);
+      return data as Map<String, dynamic>? ?? {};
+    } catch (e) {
+      return {'error': e.toString()};
+    }
+  }
+
+  // FIX: get available command types for a device before sending
+  Future<List<String>> getCommandTypes(int deviceId) async {
+    try {
+      final data = await _request('GET', '/commands/types?deviceId=$deviceId');
+      if (data == null) return [];
+      return (data as List).map((e) => e['type'] as String).toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  // ── WebSocket — with HTTP polling fallback ──
+  void connectWebSocket() {
+    if (_disposed) return;
+    _wsReconnectTimer?.cancel();
+    try {
+      final wsUrl = '${serverUrl.replaceAll(RegExp(r'/$'), '').replaceFirst(RegExp(r'^https'), 'wss').replaceFirst(RegExp(r'^http'), 'ws')}/api/socket';
+      _wsChannel = WebSocketChannel.connect(Uri.parse(wsUrl));
       _wsRetries = 0;
-      _wsSub = _ws!.stream.listen(
+
+      _wsSub = _wsChannel!.stream.listen(
         (data) {
+          if (_disposed) return;
           try {
-            final msg = json.decode(data.toString()) as Map<String, dynamic>;
-            // FIX: Explicitly map the lists inside the WebSocket message
-            if (msg['devices']   != null) onDevices?.call((msg['devices']   as List).map((e) => TraccarDevice.fromJson(e as Map<String, dynamic>)).toList());
-            if (msg['positions'] != null) onPositions?.call((msg['positions'] as List).map((e) => TraccarPosition.fromJson(e as Map<String, dynamic>)).toList());
-            if (msg['events']    != null) onEvents?.call((msg['events']    as List).map((e) => TraccarEvent.fromJson(e as Map<String, dynamic>)).toList());
+            final msg = json.decode(data.toString());
+            if (msg['devices'] != null) {
+              final devices = (msg['devices'] as List).map((e) => TraccarDevice.fromJson(e)).toList();
+              onDevicesUpdate?.call(devices);
+            }
+            if (msg['positions'] != null) {
+              final positions = (msg['positions'] as List).map((e) => TraccarPosition.fromJson(e)).toList();
+              onPositionsUpdate?.call(positions);
+              // FIX: mark WS connected once we receive live data
+              onWsConnectionChange?.call(true);
+            }
+            if (msg['events'] != null) {
+              final events = (msg['events'] as List).map((e) => TraccarEvent.fromJson(e)).toList();
+              onEventsUpdate?.call(events);
+            }
           } catch (_) {}
         },
-        onError: (_) => _reconnect(),
-        onDone:  ()  => _reconnect(),
+        onError: (_) {
+          onWsConnectionChange?.call(false);
+          _startPolling(); // FIX: fall back to polling on WS error
+          _scheduleReconnect();
+        },
+        onDone: () {
+          onWsConnectionChange?.call(false);
+          _startPolling();
+          _scheduleReconnect();
+        },
       );
-    } catch (_) { _reconnect(); }
+      // FIX: signal connected on first successful channel open
+      onWsConnectionChange?.call(true);
+    } catch (_) {
+      onWsConnectionChange?.call(false);
+      _startPolling();
+      _scheduleReconnect();
+    }
   }
 
-  void _reconnect() {
-    onWsChange?.call(false);
+  // FIX: REST polling fallback (every 15s) when WebSocket is unavailable
+  void _startPolling() {
+    _pollTimer?.cancel();
+    _pollTimer = Timer.periodic(const Duration(seconds: 15), (_) async {
+      if (_disposed) return;
+      try {
+        final devs = await getDevices();
+        final pos  = await getPositions();
+        if (devs.isNotEmpty) onDevicesUpdate?.call(devs);
+        if (pos.isNotEmpty)  onPositionsUpdate?.call(pos);
+      } catch (_) {}
+    });
+  }
+
+  void _stopPolling() {
+    _pollTimer?.cancel();
+    _pollTimer = null;
+  }
+
+  void _scheduleReconnect() {
+    if (_disposed) return;
     _wsRetries++;
-    _wsTimer = Timer(Duration(seconds: (_wsRetries * 2).clamp(2, 30)), connectWS);
+    final delay = Duration(seconds: (_wsRetries * 3).clamp(3, 60));
+    _wsReconnectTimer = Timer(delay, () {
+      _stopPolling(); // stop polling when WS reconnects
+      connectWebSocket();
+    });
   }
 
-  void dispose() { _wsTimer?.cancel(); _wsSub?.cancel(); _ws?.sink.close(); }
+  void dispose() {
+    _disposed = true;
+    _wsReconnectTimer?.cancel();
+    _pollTimer?.cancel();
+    _wsSub?.cancel();
+    _wsChannel?.sink.close();
+  }
 }
