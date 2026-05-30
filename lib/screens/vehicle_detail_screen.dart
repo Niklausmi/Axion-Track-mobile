@@ -1,6 +1,5 @@
 import 'dart:math' as math;
-// lib/screens/vehicle_detail_screen.dart — v3
-// Tabbed screen: Dashboard | Trips | Alerts | Reports | Sensor | Commands
+// lib/screens/vehicle_detail_screen.dart — v7 (Final Direct-Date Sync Fixed with Arc Bounds Fix)
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -39,7 +38,6 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
   @override
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
-    final pos   = state.posFor(widget.device.id);
     final st    = state.statusFor(widget.device);
 
     return Scaffold(
@@ -118,37 +116,98 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
 }
 
 // ══════════════════ TAB 0: DASHBOARD ══════════════════════════════════════
-class _VehicleDashTab extends StatelessWidget {
+class _VehicleDashTab extends StatefulWidget {
   final TraccarDevice device;
   const _VehicleDashTab({required this.device});
+  @override State<_VehicleDashTab> createState() => _VehicleDashTabState();
+}
+
+class _VehicleDashTabState extends State<_VehicleDashTab> {
+  List<TraccarTrip> _todayTrips = [];
+  bool _tripsLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadTodayTrips();
+  }
+
+  Future<void> _loadTodayTrips() async {
+    final svc = context.read<AppState>().service;
+    if (svc == null) { setState(() => _tripsLoading = false); return; }
+    final now  = DateTime.now();
+    final from = DateTime(now.year, now.month, now.day);
+    final to   = DateTime(now.year, now.month, now.day, 23, 59, 59);
+    try {
+      final trips = await svc.getTrips(deviceId: widget.device.id, from: from, to: to);
+      if (mounted) setState(() { _todayTrips = trips; _tripsLoading = false; });
+    } catch (_) {
+      if (mounted) setState(() => _tripsLoading = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    final state = context.watch<AppState>();
-    final pos   = state.posFor(device.id);
-    final st    = state.statusFor(device);
-    final spd   = pos?.speedKmh ?? 0.0;
-    final dist  = (pos?.totalDistance ?? 0) / 1000;
+    final state   = context.watch<AppState>();
+    final pos     = state.posFor(widget.device.id);
+    final st      = state.statusFor(widget.device);
+    final spd     = pos?.speedKmh ?? 0.0;
+
+    final todayDist   = _todayTrips.fold(0.0, (s, t) => s + t.distance) / 1000;
+    final todayDur    = _todayTrips.fold(0,   (s, t) => s + t.duration);
+    final todayMaxSpd = _todayTrips.fold(0.0, (m, t) => t.maxSpeedKmh > m ? t.maxSpeedKmh : m);
+    final todayAvgSpd = _todayTrips.isEmpty ? 0.0
+        : _todayTrips.fold(0.0, (s, t) => s + t.averageSpeed * 3.6) / _todayTrips.length;
+
+    final now = DateTime.now();
+    final todayAlerts = state.events.where((e) {
+      if (e.deviceId != widget.device.id) return false;
+      final t = (e.serverTime ?? e.eventTime)?.toLocal();
+      if (t == null) return false;
+      return t.year == now.year && t.month == now.month && t.day == now.day;
+    }).toList();
+    final todayOverspeed = todayAlerts.where((e) => e.type == 'deviceOverspeed').length;
+    final todayIdle      = todayAlerts.where((e) => e.type == 'deviceStopped' || e.type == 'deviceMoving').length;
+    final todayGeozone   = todayAlerts.where((e) => e.type.startsWith('geofence')).length;
 
     return ListView(padding: const EdgeInsets.all(16), children: [
-      // Live Telemetry card
       Container(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(20),
-          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 3))],
+          color: Theme.of(context).cardColor,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 6, offset: const Offset(0, 2))],
         ),
-        child: Column(children: [
-          const Text('Live Telemetry', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.text1)),
-          const SizedBox(height: 16),
-          // Speedometer arc
+        child: Row(children: [
+          Container(
+            width: 38, height: 38,
+            decoration: BoxDecoration(color: AppColors.bgForStatus(st), shape: BoxShape.circle),
+            child: Icon(Icons.analytics_rounded, color: AppColors.forStatus(st), size: 20)),
+          const SizedBox(width: 12),
+          const Text('Live Telemetry',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: AppColors.text1)),
+          const Spacer(),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            decoration: BoxDecoration(color: AppColors.background, borderRadius: BorderRadius.circular(12)),
+            child: Text(statusLabel(st), style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.forStatus(st)))),
+        ]),
+      ),
+      const SizedBox(height: 10),
+
+      Container(
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
+        decoration: BoxDecoration(
+          color: Theme.of(context).cardColor,
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8, offset: const Offset(0, 3))],
+        ),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           _SpeedArc(speed: spd),
-          const SizedBox(height: 14),
-          // Live Track button
+          const SizedBox(height: 8),
           SizedBox(width: double.infinity, child: ElevatedButton.icon(
             onPressed: () => Navigator.push(context,
-              MaterialPageRoute(builder: (_) => LiveTrackingScreen(device: device))),
+              MaterialPageRoute(builder: (_) => LiveTrackingScreen(device: widget.device))),
             icon: const Icon(Icons.navigation_rounded, size: 16),
             label: const Text('Live Track Vehicle'),
             style: ElevatedButton.styleFrom(
@@ -156,30 +215,59 @@ class _VehicleDashTab extends StatelessWidget {
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
             ),
           )),
-          const SizedBox(height: 12),
-          Text("Today's Distance: ${dist.toStringAsFixed(1)} km",
-            style: const TextStyle(fontSize: 13, color: AppColors.text3)),
         ]),
       ),
       const SizedBox(height: 14),
 
-      // Status card
+      Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 16),
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            colors: [Color(0xFF1A73E8), Color(0xFF0EA5E9)],
+            begin: Alignment.topLeft, end: Alignment.bottomRight),
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: [BoxShadow(color: AppColors.primary.withOpacity(0.3), blurRadius: 14, offset: const Offset(0, 6))],
+        ),
+        child: Column(children: [
+          const Padding(
+            padding: EdgeInsets.only(bottom: 12),
+            child: Text("Today's Stats",
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Colors.white70)),
+          ),
+          _tripsLoading
+            ? const SizedBox(height: 36,
+                child: Center(child: SizedBox(width: 20, height: 20,
+                  child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))))
+            : Row(children: [
+                Expanded(child: _TodayStat('Distance',  '${todayDist.toStringAsFixed(1)} km', Icons.route_rounded)),
+                Container(width: 1, height: 36, color: Colors.white.withOpacity(0.25)),
+                Expanded(child: _TodayStat('Max Spd',   '${todayMaxSpd.round()} km/h',        Icons.speed_rounded)),
+                Container(width: 1, height: 36, color: Colors.white.withOpacity(0.25)),
+                Expanded(child: _TodayStat('Avg Spd',   '${todayAvgSpd.round()} km/h',        Icons.av_timer_rounded)),
+                Container(width: 1, height: 36, color: Colors.white.withOpacity(0.25)),
+                Expanded(child: _TodayStat('Drive Time', fmtDuration(todayDur),                Icons.timer_outlined)),
+              ]),
+        ]),
+      ),
+      const SizedBox(height: 14),
+
       Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: AppColors.surface,
+          color: Theme.of(context).cardColor,
           borderRadius: BorderRadius.circular(20),
           boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10)],
         ),
         child: Column(children: [
           _DetailRow('Status', statusLabel(st), valueColor: AppColors.forStatus(st), bold: true),
           const Divider(height: 16, color: AppColors.divider),
-          _DetailRow('Vehicle', device.model ?? device.name),
+          _DetailRow('Vehicle', widget.device.model ?? widget.device.name),
           if (pos != null) ...[
             const Divider(height: 16, color: AppColors.divider),
-            // Location tile
             GestureDetector(
-              onTap: () => _openMaps(pos.latitude, pos.longitude),
+              onTap: () {
+                debugPrint('Open Google Maps: ${pos.latitude}, ${pos.longitude}');
+              },
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 decoration: BoxDecoration(
@@ -200,12 +288,102 @@ class _VehicleDashTab extends StatelessWidget {
           ],
         ]),
       ),
+      const SizedBox(height: 14),
+
+      Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Theme.of(context).cardColor,
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10)],
+        ),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            const Text("Today's Alerts",
+              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: AppColors.text1)),
+            const Spacer(),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: todayAlerts.isEmpty ? AppColors.green.withOpacity(0.1) : AppColors.red.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(20)),
+              child: Text('${todayAlerts.length} total',
+                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700,
+                  color: todayAlerts.isEmpty ? AppColors.green : AppColors.red)),
+            ),
+          ]),
+          const SizedBox(height: 12),
+          Row(children: [
+            _AlertPill('Overspeed', todayOverspeed, AppColors.red,    const Color(0xFFFEE2E2)),
+            const SizedBox(width: 8),
+            _AlertPill('Idle/Stop', todayIdle,      AppColors.orange, const Color(0xFFFEF3C7)),
+            const SizedBox(width: 8),
+            _AlertPill('Geozone',   todayGeozone,   AppColors.purple, const Color(0xFFF5F3FF)),
+          ]),
+          if (todayAlerts.isNotEmpty) ...[
+            const SizedBox(height: 14),
+            const Text('Recent', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.text3)),
+            const SizedBox(height: 8),
+            ...todayAlerts.take(3).map((e) {
+              final meta    = eventMeta(e.type);
+              final col     = Color(meta['color'] as int);
+              final bg      = Color(meta['bg']    as int);
+              final t        = (e.serverTime ?? e.eventTime)?.toLocal();
+              final timeStr = t != null ? fmtDateTime(t) : '—';
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Row(children: [
+                  Container(width: 32, height: 32,
+                    decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(10)),
+                    child: Icon(meta['icon'] as IconData, color: col, size: 16)),
+                  const SizedBox(width: 10),
+                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text(meta['label'] as String,
+                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.text1)),
+                    Text(timeStr, style: const TextStyle(fontSize: 11, color: AppColors.text3)),
+                  ])),
+                ]),
+              );
+            }),
+          ],
+          if (todayAlerts.isEmpty)
+            const Padding(
+              padding: EdgeInsets.only(top: 8),
+              child: Text('No alerts today', style: TextStyle(fontSize: 13, color: AppColors.text3))),
+        ]),
+      ),
+      const SizedBox(height: 24),
     ]);
   }
+}
 
-  void _openMaps(double lat, double lon) {
-    // would launch url_launcher in real app
-  }
+class _TodayStat extends StatelessWidget {
+  final String label, value;
+  final IconData icon;
+  const _TodayStat(this.label, this.value, this.icon);
+  @override
+  Widget build(BuildContext context) => Column(children: [
+    Icon(icon, size: 15, color: Colors.white70),
+    const SizedBox(height: 4),
+    Text(value, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w900, color: Colors.white)),
+    Text(label, style: TextStyle(fontSize: 9, color: Colors.white.withOpacity(0.65))),
+  ]);
+}
+
+class _AlertPill extends StatelessWidget {
+  final String label;
+  final int count;
+  final Color color, bg;
+  const _AlertPill(this.label, this.count, this.color, this.bg);
+  @override
+  Widget build(BuildContext context) => Expanded(child: Container(
+    padding: const EdgeInsets.symmetric(vertical: 10),
+    decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(12)),
+    child: Column(children: [
+      Text('$count', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: color)),
+      Text(label, style: TextStyle(fontSize: 9, color: color, fontWeight: FontWeight.w600)),
+    ]),
+  ));
 }
 
 // ══════════════════ TAB 1: TRIPS ══════════════════════════════════════════
@@ -214,24 +392,39 @@ class _TripsTab extends StatefulWidget {
   const _TripsTab({required this.device});
   @override State<_TripsTab> createState() => _TripsTabState();
 }
+
 class _TripsTabState extends State<_TripsTab> {
-  DateTime _from = DateTime.now().subtract(const Duration(days: 7));
-  DateTime _to   = DateTime.now();
+  static DateTime _today()     => DateTime.now();
+  static DateTime _midnight(DateTime d) => DateTime(d.year, d.month, d.day);
+
+  DateTime _from = _midnight(DateTime.now());
+  DateTime _to   = _midnight(DateTime.now());
   List<TraccarTrip> _trips = [];
   bool _loading = false;
+  String? _error;
 
   @override
   void initState() { super.initState(); _load(); }
 
   Future<void> _load() async {
-    setState(() { _loading = true; _trips = []; });
+    setState(() { _loading = true; _trips = []; _error = null; });
     final svc = context.read<AppState>().service;
-    if (svc == null) { setState(() => _loading = false); return; }
+    if (svc == null) {
+      if (mounted) setState(() { _loading = false; _error = 'Not connected to server'; });
+      return;
+    }
     try {
-      final t = await svc.getTrips(deviceId: widget.device.id, from: _from,
-        to: DateTime(_to.year, _to.month, _to.day, 23, 59, 59));
+      final fromMidnight = _midnight(_from);
+      final toEndOfDay   = DateTime(_to.year, _to.month, _to.day, 23, 59, 59);
+      final t = await svc.getTrips(
+        deviceId: widget.device.id,
+        from: fromMidnight,
+        to: toEndOfDay,
+      );
       if (mounted) setState(() => _trips = t);
-    } catch (_) {}
+    } catch (e) {
+      if (mounted) setState(() => _error = e.toString().replaceAll('Exception: ', ''));
+    }
     if (mounted) setState(() => _loading = false);
   }
 
@@ -240,13 +433,16 @@ class _TripsTabState extends State<_TripsTab> {
       context: context,
       initialDate: isFrom ? _from : _to,
       firstDate: DateTime.now().subtract(const Duration(days: 365)),
-      lastDate: DateTime.now(),
+      lastDate: _today(),
       builder: (ctx, child) => Theme(
         data: Theme.of(ctx).copyWith(colorScheme: const ColorScheme.light(primary: AppColors.primary)),
         child: child!),
     );
     if (picked != null) {
-      setState(() { if (isFrom) _from = picked; else _to = picked; });
+      setState(() {
+        if (isFrom) _from = _midnight(picked); 
+        else        _to   = _midnight(picked); 
+      });
       _load();
     }
   }
@@ -257,7 +453,6 @@ class _TripsTabState extends State<_TripsTab> {
     final totalDur  = _trips.fold(0,   (s, t) => s + t.duration);
 
     return ListView(padding: const EdgeInsets.all(16), children: [
-      // Date range selector
       Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(18),
@@ -267,10 +462,33 @@ class _TripsTabState extends State<_TripsTab> {
           const SizedBox(height: 10),
           SingleChildScrollView(scrollDirection: Axis.horizontal,
             child: Row(children: [
-              _QuickBtn('Today', () { setState(() { _from = DateTime.now(); _to = DateTime.now(); }); _load(); }),
-              _QuickBtn('Yesterday', () { final y = DateTime.now().subtract(const Duration(days: 1)); setState(() { _from = y; _to = y; }); _load(); }),
-              _QuickBtn('This Week', () { final now = DateTime.now(); setState(() { _from = now.subtract(Duration(days: now.weekday-1)); _to = now; }); _load(); }),
-              _QuickBtn('Last Week', () { final now = DateTime.now(); final start = now.subtract(Duration(days: now.weekday+6)); setState(() { _from = start; _to = start.add(const Duration(days: 6)); }); _load(); }),
+              _QuickBtn('Today', () {
+                final today = _midnight(_today());
+                setState(() { _from = today; _to = today; });
+                _load();
+              }),
+              _QuickBtn('Yesterday', () {
+                final y = _midnight(_today().subtract(const Duration(days: 1)));
+                setState(() { _from = y; _to = y; });
+                _load();
+              }),
+              _QuickBtn('This Week', () {
+                final now = _today();
+                setState(() {
+                  _from = _midnight(now.subtract(Duration(days: now.weekday - 1)));
+                  _to   = _midnight(now);
+                });
+                _load();
+              }),
+              _QuickBtn('Last Week', () {
+                final now   = _today();
+                final start = _midnight(now.subtract(Duration(days: now.weekday + 6)));
+                setState(() {
+                  _from = start;
+                  _to   = _midnight(start.add(const Duration(days: 6)));
+                });
+                _load();
+              }),
             ]),
           ),
           const SizedBox(height: 14),
@@ -314,6 +532,34 @@ class _TripsTabState extends State<_TripsTab> {
       ),
       const SizedBox(height: 14),
 
+      // Complete Playback Action Button
+      SizedBox(
+        width: double.infinity,
+        height: 46,
+        child: OutlinedButton.icon(
+          onPressed: () {
+            Navigator.push(context, MaterialPageRoute(
+              builder: (_) => HistoryScreen(
+                device: widget.device, 
+                jumpToTrip: null,
+                initialDate: _from,
+              )));
+          },
+          icon: const Icon(Icons.play_circle_outline_rounded, size: 18),
+          label: const Text(
+            'Complete History Playback',
+            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, fontFamily: 'Inter'),
+          ),
+          style: OutlinedButton.styleFrom(
+            foregroundColor: AppColors.primary,
+            side: BorderSide(color: AppColors.primary.withOpacity(0.4), width: 1.2),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            backgroundColor: AppColors.primary.withOpacity(0.02),
+          ),
+        ),
+      ),
+      const SizedBox(height: 16),
+
       const Text('Trips History', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: AppColors.text1)),
       const SizedBox(height: 10),
 
@@ -326,11 +572,11 @@ class _TripsTabState extends State<_TripsTab> {
           border: Border.all(color: AppColors.primary.withOpacity(0.15)),
         ),
         child: Row(children: [
-          Expanded(child: _TripStat('Total Trips',    '${_trips.length}',               AppColors.primary)),
+          Expanded(child: _TripStat('Total Trips',    '${_trips.length}',   AppColors.primary)),
           Container(width: 1, height: 36, color: AppColors.primary.withOpacity(0.2)),
-          Expanded(child: _TripStat('Total Distance', fmtKm(totalDist),                  AppColors.primary)),
+          Expanded(child: _TripStat('Total Distance', fmtKm(totalDist),     AppColors.primary)),
           Container(width: 1, height: 36, color: AppColors.primary.withOpacity(0.2)),
-          Expanded(child: _TripStat('Total Time',     fmtDuration(totalDur),             AppColors.primary)),
+          Expanded(child: _TripStat('Total Time',     fmtDuration(totalDur), AppColors.primary)),
         ]),
       ),
       const SizedBox(height: 10),
@@ -338,12 +584,42 @@ class _TripsTabState extends State<_TripsTab> {
       if (_loading) const Center(child: Padding(padding: EdgeInsets.all(32),
         child: CircularProgressIndicator(color: AppColors.primary, strokeWidth: 2))),
 
+      if (!_loading && _error != null) Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: AppColors.red.withOpacity(0.07),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: AppColors.red.withOpacity(0.25)),
+        ),
+        child: Column(children: [
+          Row(children: [
+            const Icon(Icons.error_outline_rounded, size: 18, color: AppColors.red),
+            const SizedBox(width: 10),
+            Expanded(child: Text(_error!,
+              style: const TextStyle(fontSize: 13, color: AppColors.red))),
+          ]),
+          const SizedBox(height: 10),
+          SizedBox(width: double.infinity, child: OutlinedButton.icon(
+            onPressed: _load,
+            icon: const Icon(Icons.refresh_rounded, size: 16),
+            label: const Text('Retry'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: AppColors.red,
+              side: BorderSide(color: AppColors.red.withOpacity(0.5)),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+          )),
+        ]),
+      ),
+
       ..._trips.map((t) => _TripCard(trip: t, onReplay: () {
         Navigator.push(context, MaterialPageRoute(builder: (_) =>
           HistoryScreen(device: widget.device, jumpToTrip: t)));
       })),
 
-      if (!_loading && _trips.isEmpty) const Padding(padding: EdgeInsets.symmetric(vertical: 40),
+      if (!_loading && _error == null && _trips.isEmpty) const Padding(
+        padding: EdgeInsets.symmetric(vertical: 40),
         child: Center(child: Text('No trips in this period', style: TextStyle(color: AppColors.text3)))),
     ]);
   }
@@ -354,50 +630,59 @@ class _TripCard extends StatelessWidget {
   final VoidCallback onReplay;
   const _TripCard({required this.trip, required this.onReplay});
   @override
-  Widget build(BuildContext context) => Container(
-    margin: const EdgeInsets.only(bottom: 10),
-    padding: const EdgeInsets.all(16),
-    decoration: BoxDecoration(
-      color: AppColors.surface,
-      borderRadius: BorderRadius.circular(16),
-      boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8)]),
-    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Row(children: [
-        Container(width: 36, height: 36,
-          decoration: BoxDecoration(color: AppColors.primary.withOpacity(0.1), shape: BoxShape.circle),
-          child: const Icon(Icons.route_rounded, color: AppColors.primary, size: 18)),
-        const SizedBox(width: 12),
-        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(trip.startTime != null
-            ? '${trip.startTime!.month}/${trip.startTime!.day}/${trip.startTime!.year} ${fmtTimeOnly(trip.startTime)}'
-            : '—',
-            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.text1)),
-          Text('End: ${fmtTimeOnly(trip.endTime)}',
-            style: const TextStyle(fontSize: 12, color: AppColors.text3)),
-        ])),
+  Widget build(BuildContext context) {
+    final startLocal = trip.startTime?.toLocal();
+    final endLocal   = trip.endTime?.toLocal();
+    final dateStr = startLocal != null
+      ? '${startLocal.month}/${startLocal.day}/${startLocal.year} ${fmtTimeOnly(trip.startTime)}'
+      : '—';
+    final endStr = endLocal != null
+      ? fmtTimeOnly(trip.endTime)
+      : '—';
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8)]),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Container(width: 36, height: 36,
+            decoration: BoxDecoration(color: AppColors.primary.withOpacity(0.1), shape: BoxShape.circle),
+            child: const Icon(Icons.route_rounded, color: AppColors.primary, size: 18)),
+          const SizedBox(width: 12),
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(dateStr,
+              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.text1)),
+            Text('End: $endStr',
+              style: const TextStyle(fontSize: 12, color: AppColors.text3)),
+          ])),
+        ]),
+        const SizedBox(height: 12),
+        Row(children: [
+          _TripInfo('Distance', '${trip.distanceKm.toStringAsFixed(1)} km'),
+          const SizedBox(width: 16),
+          _TripInfo('Duration', trip.durationStr),
+          const SizedBox(width: 16),
+          _TripInfo('Max Spd',  '${trip.maxSpeedKmh.round()} km/h'),
+        ]),
+        const SizedBox(height: 12),
+        SizedBox(width: double.infinity, child: OutlinedButton.icon(
+          onPressed: onReplay,
+          icon: const Icon(Icons.play_circle_outline_rounded, size: 16),
+          label: const Text('Replay on Map'),
+          style: OutlinedButton.styleFrom(
+            padding: const EdgeInsets.symmetric(vertical: 10),
+            foregroundColor: AppColors.primary,
+            side: const BorderSide(color: AppColors.primary),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          ),
+        )),
       ]),
-      const SizedBox(height: 12),
-      Row(children: [
-        _TripInfo('Distance', '${trip.distanceKm.toStringAsFixed(1)} km'),
-        const SizedBox(width: 16),
-        _TripInfo('Duration', trip.durationStr),
-        const SizedBox(width: 16),
-        _TripInfo('Max Spd',  '${trip.maxSpeedKmh.round()} km/h'),
-      ]),
-      const SizedBox(height: 12),
-      SizedBox(width: double.infinity, child: OutlinedButton.icon(
-        onPressed: onReplay,
-        icon: const Icon(Icons.play_circle_outline_rounded, size: 16),
-        label: const Text('Replay on Map'),
-        style: OutlinedButton.styleFrom(
-          padding: const EdgeInsets.symmetric(vertical: 10),
-          foregroundColor: AppColors.primary,
-          side: const BorderSide(color: AppColors.primary),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        ),
-      )),
-    ]),
-  );
+    );
+  }
 }
 
 class _TripInfo extends StatelessWidget {
@@ -449,70 +734,122 @@ class _VehicleAlertsTab extends StatelessWidget {
       Padding(
         padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
         child: Align(alignment: Alignment.centerLeft,
-          child: Text('Vehicle Alerts', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: AppColors.text1))),
+          child: const Text('Vehicle Alerts', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: AppColors.text1))),
       ),
       Expanded(child: events.isEmpty
         ? const Center(child: Text('No alerts', style: TextStyle(color: AppColors.text3)))
         : ListView.builder(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             itemCount: events.length,
-            itemBuilder: (_, i) => _AlertRow(event: events[i]),
+            itemBuilder: (_, i) => _VehicleAlertRow(event: events[i]),
           )),
     ]);
   }
 }
 
-class _AlertRow extends StatelessWidget {
+class _VehicleAlertRow extends StatelessWidget {
   final TraccarEvent event;
-  const _AlertRow({required this.event});
+  const _VehicleAlertRow({required this.event});
   @override
   Widget build(BuildContext context) {
-    final meta = eventMeta(event.type);
-    final col  = Color(meta['color'] as int);
-    final bg   = Color(meta['bg']    as int);
+    final meta  = eventMeta(event.type);
+    final col   = Color(meta['color'] as int);
+    final bg    = Color(meta['bg']    as int);
     final label = meta['label'] as String;
-    final pos   = event.attributes['latitude'] != null
-      ? '${(event.attributes['latitude'] as num).toStringAsFixed(4)}, ${(event.attributes['longitude'] as num).toStringAsFixed(4)}'
-      : null;
-    final spd = event.attributes['speed'] != null
+    final lat   = (event.attributes['latitude']  as num?)?.toDouble();
+    final lon   = (event.attributes['longitude'] as num?)?.toDouble();
+    final spd   = event.attributes['speed'] != null
       ? '${((event.attributes['speed'] as num) * 3.6).round()} km/h' : null;
+    final t        = (event.serverTime ?? event.eventTime)?.toLocal();
+    final timeStr  = t != null ? fmtDateTime(t) : '—';
+    final hasLoc   = lat != null && lon != null;
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 10),
+      margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
-        color: AppColors.surface,
+        color: Theme.of(context).cardColor,
         borderRadius: BorderRadius.circular(16),
         border: Border(left: BorderSide(color: col, width: 3)),
         boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8)],
       ),
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Row(children: [
-          Container(width: 36, height: 36,
-            decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(12)),
-            child: Icon(meta['icon'] as IconData, color: col, size: 18)),
-          const SizedBox(width: 12),
-          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Row(children: [
-              Expanded(child: Text(label, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.text1))),
-              Text(fmtTimeOnly(event.serverTime), style: const TextStyle(fontSize: 11, color: AppColors.text4)),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Padding(
+          padding: const EdgeInsets.all(14),
+          child: Row(children: [
+            Container(width: 36, height: 36,
+              decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(12)),
+              child: Icon(meta['icon'] as IconData, color: col, size: 18)),
+            const SizedBox(width: 12),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(label, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.text1)),
+              const SizedBox(height: 3),
+              Text(timeStr, style: const TextStyle(fontSize: 11, color: AppColors.text3)),
+              if (spd != null) ...[
+                const SizedBox(width: 2),
+                Row(children: [
+                  const Icon(Icons.speed_rounded, size: 12, color: AppColors.text4),
+                  const SizedBox(width: 4),
+                  Text(spd, style: const TextStyle(fontSize: 11, color: AppColors.text3)),
+                ]),
+              ],
+              if (hasLoc) ...[
+                const SizedBox(width: 2),
+                Row(children: [
+                  const Icon(Icons.location_on_outlined, size: 12, color: AppColors.text4),
+                  const SizedBox(width: 4),
+                  Text('${lat!.toStringAsFixed(4)}, ${lon!.toStringAsFixed(4)}',
+                    style: const TextStyle(fontSize: 11, color: AppColors.text3)),
+                ]),
+              ],
+            ])),
+          ]),
+        ),
+        if (hasLoc) ClipRRect(
+          borderRadius: const BorderRadius.vertical(bottom: Radius.circular(14)),
+          child: SizedBox(
+            height: 120,
+            child: Stack(children: [
+              FlutterMap(
+                options: MapOptions(
+                  initialCenter: LatLng(lat!, lon!),
+                  initialZoom: 14,
+                  interactionOptions: const InteractionOptions(flags: InteractiveFlag.none),
+                ),
+                children: [
+                  TileLayer(urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                    userAgentPackageName: 'com.axiontrack.app'),
+                  MarkerLayer(markers: [
+                    Marker(
+                      point: LatLng(lat, lon),
+                      width: 32, height: 32,
+                      child: Container(
+                        decoration: BoxDecoration(color: bg, shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white, width: 2),
+                          boxShadow: [BoxShadow(color: col.withOpacity(0.4), blurRadius: 6)]),
+                        child: Icon(meta['icon'] as IconData, color: col, size: 14)),
+                    ),
+                  ]),
+                ],
+              ),
+              Positioned(bottom: 6, right: 6, child: GestureDetector(
+                onTap: () => debugPrint('Open Maps: $lat, $lon'),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(8),
+                    boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.15), blurRadius: 4)]),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    const Icon(Icons.open_in_new_rounded, size: 11, color: AppColors.primary),
+                    const SizedBox(width: 4),
+                    const Text('Maps', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: AppColors.primary)),
+                  ]),
+                ),
+              )),
             ]),
-            if (pos != null) ...[
-              const SizedBox(height: 4),
-              Row(children: [
-                const Icon(Icons.location_on_outlined, size: 12, color: AppColors.text4),
-                const SizedBox(width: 4),
-                Text(pos, style: const TextStyle(fontSize: 11, color: AppColors.text3)),
-              ]),
-            ],
-            if (spd != null) ...[
-              const SizedBox(height: 2),
-              Text(label.contains('started') ? '$label at $spd' : '',
-                style: const TextStyle(fontSize: 11, color: AppColors.text3)),
-            ],
-          ])),
-        ]),
-      ),
+          ),
+        ),
+      ]),
     );
   }
 }
@@ -524,7 +861,7 @@ class _ReportsTab extends StatefulWidget {
   @override State<_ReportsTab> createState() => _ReportsTabState();
 }
 class _ReportsTabState extends State<_ReportsTab> {
-  DateTime _from = DateTime.now().subtract(const Duration(days: 7));
+  DateTime _from = DateTime.now();
   DateTime _to   = DateTime.now();
 
   static const _reports = [
@@ -538,7 +875,6 @@ class _ReportsTabState extends State<_ReportsTab> {
 
   @override
   Widget build(BuildContext context) => ListView(padding: const EdgeInsets.all(16), children: [
-    // Date range
     Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(18),
@@ -642,7 +978,6 @@ class _SensorTab extends StatelessWidget {
     final din1  = attrs['di1'] ?? attrs['in1'] ?? attrs['input1'];
 
     return ListView(padding: const EdgeInsets.all(16), children: [
-      // Power & Battery Health
       _SensorGroup(
         icon: Icons.battery_charging_full_rounded,
         iconColor: AppColors.green,
@@ -674,7 +1009,6 @@ class _SensorTab extends StatelessWidget {
       ),
       const SizedBox(height: 14),
 
-      // Connectivity & Signal
       _SensorGroup(
         icon: Icons.wifi_rounded,
         iconColor: AppColors.teal,
@@ -707,7 +1041,6 @@ class _SensorTab extends StatelessWidget {
       ),
       const SizedBox(height: 14),
 
-      // GPS & Compass
       _SensorGroup(
         icon: Icons.navigation_rounded,
         iconColor: AppColors.orange,
@@ -742,7 +1075,6 @@ class _SensorTab extends StatelessWidget {
       ),
       const SizedBox(height: 14),
 
-      // Relays & Diagnostics
       _SensorGroup(
         icon: Icons.handyman_rounded,
         iconColor: AppColors.purple,
@@ -832,6 +1164,13 @@ class _SensorRowInline extends StatelessWidget {
     Expanded(child: Text(label, style: const TextStyle(fontSize: 13, color: AppColors.text3))),
     Text(value, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: color)),
   ]);
+}
+
+class _OriginalStatusBadge extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return _SignalBars(100);
+  }
 }
 
 class _RelayBox extends StatelessWidget {
@@ -928,7 +1267,6 @@ class _CommandsTabState extends State<_CommandsTab> {
       style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: AppColors.text1)),
     const SizedBox(height: 14),
 
-    // Status card
     Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -966,7 +1304,6 @@ class _CommandsTabState extends State<_CommandsTab> {
       ]),
     ),
 
-    // Immobilize button
     SizedBox(width: double.infinity, child: ElevatedButton.icon(
       onPressed: _sending ? null : () => _send('engineStop'),
       icon: const Icon(Icons.lock_rounded, size: 18),
@@ -980,7 +1317,6 @@ class _CommandsTabState extends State<_CommandsTab> {
     )),
     const SizedBox(height: 10),
 
-    // Un-immobilize button
     SizedBox(width: double.infinity, child: ElevatedButton.icon(
       onPressed: _sending ? null : () => _send('engineResume'),
       icon: const Icon(Icons.lock_open_rounded, size: 18),
@@ -1042,50 +1378,101 @@ class _DetailRow extends StatelessWidget {
   ]);
 }
 
-// Speedometer arc widget
 class _SpeedArc extends StatelessWidget {
   final double speed;
   const _SpeedArc({required this.speed});
   @override
-  Widget build(BuildContext context) => SizedBox(
-    height: 130,
-    child: CustomPaint(painter: _ArcPainter(speed), child: Center(
-      child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-        const SizedBox(height: 20),
-        Text('${speed.round()}', style: const TextStyle(fontSize: 48, fontWeight: FontWeight.w900, color: AppColors.text1, height: 1)),
-        const Text('km/h', style: TextStyle(fontSize: 14, color: AppColors.text3)),
-      ]),
-    )),
-  );
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(top: 16),
+      height: 140,
+      child: CustomPaint(
+        painter: _ArcPainter(speed),
+        child: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              Text('${speed.round()}', style: const TextStyle(fontSize: 44, fontWeight: FontWeight.w900, color: AppColors.text1, height: 1)),
+              const Text('km/h', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.text3)),
+              const SizedBox(height: 12), 
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _ArcPainter extends CustomPainter {
   final double speed;
   _ArcPainter(this.speed);
+
   @override
   void paint(Canvas canvas, Size size) {
-
-    final cx = size.width / 2, cy = size.height * 0.85;
-    final r  = size.width * 0.42;
+    final cx = size.width / 2;
+    final cy = size.height - 20;
+    final r = size.height - 40; 
+    
     const startAngle = math.pi;
     const sweep = math.pi;
-    canvas.drawArc(Rect.fromCircle(center: Offset(cx, cy), radius: r), startAngle, sweep, false,
-      Paint()..color = const Color(0xFFE5E7EB)..style = PaintingStyle.stroke..strokeWidth = 8..strokeCap = StrokeCap.round);
+    final arcRect = Rect.fromCircle(center: Offset(cx, cy), radius: r);
+
+    // Track Background
+    canvas.drawArc(
+      arcRect, 
+      startAngle, 
+      sweep, 
+      false,
+      Paint()
+        ..color = const Color(0xFFE5E7EB)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 10
+        ..strokeCap = StrokeCap.round
+    );
+
+    // Track Active Fill Progress
     final pct = (speed / 200).clamp(0.0, 1.0);
     if (pct > 0) {
-      canvas.drawArc(Rect.fromCircle(center: Offset(cx, cy), radius: r), startAngle, sweep * pct, false,
-        Paint()..color = speed > 100 ? const Color(0xFFDC2626) : speed > 60 ? const Color(0xFFD97706) : const Color(0xFF1A73E8)
-          ..style = PaintingStyle.stroke..strokeWidth = 8..strokeCap = StrokeCap.round);
+      canvas.drawArc(
+        arcRect, 
+        startAngle, 
+        sweep * pct, 
+        false,
+        Paint()
+          ..color = speed > 100 
+              ? const Color(0xFFDC2626) 
+              : speed > 60 
+                  ? const Color(0xFFD97706) 
+                  : const Color(0xFF1A73E8)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 10
+          ..strokeCap = StrokeCap.round
+      );
     }
-    // Labels
+
+    // Ticks & Overlay Values
     final tp = TextPainter(textDirection: TextDirection.ltr);
     for (final v in [0, 100, 200]) {
       final a = startAngle + sweep * (v / 200);
-      tp..text = TextSpan(text: '$v', style: const TextStyle(fontSize: 10, color: Color(0xFF94A3B8)))..layout();
-      canvas.drawLine(Offset(cx + (r-12)*math.cos(a), cy + (r-12)*math.sin(a)),
-        Offset(cx + (r+4)*math.cos(a), cy + (r+4)*math.sin(a)),
-        Paint()..color = const Color(0xFFCBD5E1)..strokeWidth = 1.5);
+      
+      tp..text = TextSpan(
+        text: '$v', 
+        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFF94A3B8))
+      )..layout();
+      
+      canvas.drawLine(
+        Offset(cx + (r - 12) * math.cos(a), cy + (r - 12) * math.sin(a)),
+        Offset(cx + (r - 2) * math.cos(a), cy + (r - 2) * math.sin(a)),
+        Paint()..color = const Color(0xFFCBD5E1)..strokeWidth = 2.0
+      );
+      
+      final textRadius = r + 14;
+      canvas.save();
+      canvas.translate(cx + textRadius * math.cos(a), cy + textRadius * math.sin(a));
+      tp.paint(canvas, Offset(-tp.width / 2, -tp.height / 2));
+      canvas.restore();
     }
   }
+
   @override bool shouldRepaint(_ArcPainter o) => o.speed != speed;
 }

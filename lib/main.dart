@@ -1,4 +1,4 @@
-// lib/main.dart  — v2
+// lib/main.dart  — v3 (Hardcoded Light Theme Configured)
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -17,17 +17,22 @@ void main() {
 
 class AxionTrackApp extends StatelessWidget {
   const AxionTrackApp({super.key});
+  
   @override
-  Widget build(BuildContext context) => MaterialApp(
-    title: 'Axion Track',
-    theme: AppTheme.theme,
-    debugShowCheckedModeBanner: false,
-    home: const _SplashRouter(),
-    routes: {
-      '/login': (_) => const LoginScreen(),
-      '/home':  (_) => const HomeScreen(),
-    },
-  );
+  Widget build(BuildContext context) {
+    // ── NOTE: AppState no longer watched for dark mode triggers since it is purely light mode now ──
+    return MaterialApp(
+      title: 'Axion Track',
+      theme: AppTheme.theme,
+      themeMode: ThemeMode.light, // ── FIX: Hardcoded strictly to light mode ──
+      debugShowCheckedModeBanner: false,
+      home: const _SplashRouter(),
+      routes: {
+        '/login': (_) => const LoginScreen(),
+        '/home':  (_) => const HomeScreen(),
+      },
+    );
+  }
 }
 
 class _SplashRouter extends StatefulWidget {

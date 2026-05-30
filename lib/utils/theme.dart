@@ -12,6 +12,16 @@ class AppColors {
   static const background  = Color(0xFFF4F6FA);
   static const card        = Color(0xFFFFFFFF);
 
+  // Dark mode equivalents
+  static const surfaceDark     = Color(0xFF1E2130);
+  static const backgroundDark  = Color(0xFF12141F);
+  static const cardDark        = Color(0xFF252837);
+  static const dividerDark     = Color(0xFF2E3248);
+  static const text1Dark       = Color(0xFFF1F5F9);
+  static const text2Dark       = Color(0xFFCBD5E1);
+  static const text3Dark       = Color(0xFF94A3B8);
+  static const text4Dark       = Color(0xFF64748B);
+
   // Status
   static const running = Color(0xFF16A34A);
   static const stopped = Color(0xFFDC2626);
@@ -88,6 +98,62 @@ class AppTheme {
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
       fillColor: AppColors.background,
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: BorderSide.none,
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: const BorderSide(color: AppColors.primary, width: 1.5),
+      ),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+    ),
+    elevatedButtonTheme: ElevatedButtonThemeData(
+      style: ElevatedButton.styleFrom(
+        backgroundColor: AppColors.primary,
+        foregroundColor: Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        padding: const EdgeInsets.symmetric(vertical: 16),
+        textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, fontFamily: 'Inter'),
+        elevation: 0,
+      ),
+    ),
+    pageTransitionsTheme: const PageTransitionsTheme(builders: {
+      TargetPlatform.android: CupertinoPageTransitionsBuilder(),
+      TargetPlatform.iOS:     CupertinoPageTransitionsBuilder(),
+    }),
+  );
+
+  static ThemeData get darkTheme => ThemeData(
+    useMaterial3: true,
+    fontFamily: 'Inter',
+    brightness: Brightness.dark,
+    colorScheme: ColorScheme.fromSeed(
+      seedColor: AppColors.primary,
+      brightness: Brightness.dark,
+      surface: AppColors.surfaceDark,
+    ),
+    scaffoldBackgroundColor: AppColors.backgroundDark,
+    appBarTheme: const AppBarTheme(
+      backgroundColor: AppColors.surfaceDark,
+      foregroundColor: AppColors.text1Dark,
+      elevation: 0,
+      scrolledUnderElevation: 0,
+      centerTitle: false,
+      titleTextStyle: TextStyle(
+        fontSize: 20, fontWeight: FontWeight.w800,
+        color: AppColors.text1Dark, fontFamily: 'Inter',
+      ),
+      systemOverlayStyle: SystemUiOverlayStyle.light,
+    ),
+    cardTheme: CardThemeData(
+      color: AppColors.cardDark,
+      elevation: 0,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+    ),
+    inputDecorationTheme: InputDecorationTheme(
+      filled: true,
+      fillColor: AppColors.cardDark,
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(14),
         borderSide: BorderSide.none,

@@ -1,4 +1,4 @@
-// lib/services/traccar_service.dart  — v2 (fixed + improved)
+// lib/services/traccar_service.dart — v4 (Extended Network Timeout Engine)
 import 'dart:convert';
 import 'dart:async';
 import 'package:http/http.dart' as http;
@@ -12,10 +12,13 @@ class TraccarService {
   late final String _authHeader;
   late final String _baseUrl;
 
+  // ── FIX: Maintain a single client session engine to persist cookies natively ──
+  final http.Client _client = http.Client();
+
   WebSocketChannel? _wsChannel;
   StreamSubscription? _wsSub;
   Timer? _wsReconnectTimer;
-  Timer? _pollTimer;               // FIX: polling fallback when WS is down
+  Timer? _pollTimer;               // Polling fallback when WS is down
   int _wsRetries = 0;
   bool _disposed = false;
 
@@ -34,14 +37,14 @@ class TraccarService {
     _authHeader = 'Basic ${base64Encode(utf8.encode('$email:$password'))}';
   }
 
-  // FIX: headers include cookie jar via credentials – always send auth
+  // Fallback authorization payload if server drops cookie context caches
   Map<String, String> get _headers => {
     'Authorization': _authHeader,
     'Accept': 'application/json',
     'Content-Type': 'application/json',
   };
 
-  // FIX: unified request method with proper timeout & error wrapping
+  // ── REFACTOR: All requests route through the persistent shared _client ──
   Future<dynamic> _request(String method, String path, {Map<String, dynamic>? body, bool form = false}) async {
     final uri = Uri.parse('$_baseUrl$path');
     http.Response res;
@@ -51,26 +54,29 @@ class TraccarService {
     try {
       switch (method) {
         case 'GET':
-          res = await http.get(uri, headers: headers).timeout(const Duration(seconds: 20));
+          // ── FIX: Increased timeout from 20s to 60s to support heavy tracking queries ──
+          res = await _client.get(uri, headers: headers).timeout(const Duration(seconds: 60));
           break;
         case 'POST':
           final b = form && body != null
               ? body.map((k, v) => MapEntry(k, v.toString()))
               : null;
-          res = await http.post(
+          // ── FIX: Increased timeout from 20s to 60s to support heavy tracking queries ──
+          res = await _client.post(
             uri,
             headers: headers,
             body: form ? b : (body != null ? json.encode(body) : null),
-          ).timeout(const Duration(seconds: 20));
+          ).timeout(const Duration(seconds: 60));
           break;
         case 'DELETE':
-          res = await http.delete(uri, headers: headers).timeout(const Duration(seconds: 20));
+          // ── FIX: Increased timeout from 20s to 60s to support heavy tracking queries ──
+          res = await _client.delete(uri, headers: headers).timeout(const Duration(seconds: 60));
           break;
         default:
           throw Exception('Unsupported method: $method');
       }
     } on TimeoutException {
-      throw Exception('Connection timed out. Check your server URL.');
+      throw Exception('Connection timed out. The server is taking too long to compile logs.');
     } on Exception catch (e) {
       throw Exception('Network error: $e');
     }
@@ -115,7 +121,6 @@ class TraccarService {
     return (data as List).map((e) => TraccarGeofence.fromJson(e)).toList();
   }
 
-  // FIX: events API — removed .take(20) device id cap, added proper error boundary
   Future<List<TraccarEvent>> getEvents({
     required DateTime from,
     required DateTime to,
@@ -184,7 +189,6 @@ class TraccarService {
     }
   }
 
-  // FIX: sendCommand uses correct JSON body structure + returns proper response
   Future<Map<String, dynamic>> sendCommand({
     required int deviceId,
     required String type,
@@ -203,7 +207,6 @@ class TraccarService {
     }
   }
 
-  // FIX: get available command types for a device before sending
   Future<List<String>> getCommandTypes(int deviceId) async {
     try {
       final data = await _request('GET', '/commands/types?deviceId=$deviceId');
@@ -214,13 +217,18 @@ class TraccarService {
     }
   }
 
-  // ── WebSocket — with HTTP polling fallback ──
+  // ── WebSocket ──
   void connectWebSocket() {
     if (_disposed) return;
     _wsReconnectTimer?.cancel();
     try {
       final wsUrl = '${serverUrl.replaceAll(RegExp(r'/$'), '').replaceFirst(RegExp(r'^https'), 'wss').replaceFirst(RegExp(r'^http'), 'ws')}/api/socket';
-      _wsChannel = WebSocketChannel.connect(Uri.parse(wsUrl));
+      
+      // OPTIMIZATION: Explicitly hook into JSON serialization protocols on proxy handshakes
+      _wsChannel = WebSocketChannel.connect(
+        Uri.parse(wsUrl),
+        protocols: ['json'],
+      );
       _wsRetries = 0;
 
       _wsSub = _wsChannel!.stream.listen(
@@ -235,7 +243,6 @@ class TraccarService {
             if (msg['positions'] != null) {
               final positions = (msg['positions'] as List).map((e) => TraccarPosition.fromJson(e)).toList();
               onPositionsUpdate?.call(positions);
-              // FIX: mark WS connected once we receive live data
               onWsConnectionChange?.call(true);
             }
             if (msg['events'] != null) {
@@ -246,7 +253,7 @@ class TraccarService {
         },
         onError: (_) {
           onWsConnectionChange?.call(false);
-          _startPolling(); // FIX: fall back to polling on WS error
+          _startPolling(); 
           _scheduleReconnect();
         },
         onDone: () {
@@ -255,7 +262,6 @@ class TraccarService {
           _scheduleReconnect();
         },
       );
-      // FIX: signal connected on first successful channel open
       onWsConnectionChange?.call(true);
     } catch (_) {
       onWsConnectionChange?.call(false);
@@ -264,7 +270,6 @@ class TraccarService {
     }
   }
 
-  // FIX: REST polling fallback (every 15s) when WebSocket is unavailable
   void _startPolling() {
     _pollTimer?.cancel();
     _pollTimer = Timer.periodic(const Duration(seconds: 15), (_) async {
@@ -288,16 +293,18 @@ class TraccarService {
     _wsRetries++;
     final delay = Duration(seconds: (_wsRetries * 3).clamp(3, 60));
     _wsReconnectTimer = Timer(delay, () {
-      _stopPolling(); // stop polling when WS reconnects
+      _stopPolling(); 
       connectWebSocket();
     });
   }
 
+  // ── FIX: Clean up the persistent client session along with timers to avoid memory leak ports ──
   void dispose() {
     _disposed = true;
     _wsReconnectTimer?.cancel();
     _pollTimer?.cancel();
     _wsSub?.cancel();
     _wsChannel?.sink.close();
+    _client.close(); 
   }
 }

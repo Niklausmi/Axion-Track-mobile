@@ -1,4 +1,4 @@
-// lib/services/app_state.dart  — v2
+// lib/services/app_state.dart — v6 (Clean Light Mode Setup + Sticky Session Fix)
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/traccar_models.dart';
@@ -14,7 +14,7 @@ class AppState extends ChangeNotifier {
   bool wsConnected = false;
   String? error;
 
-  // FIX: expose last refresh time so screens can show "updated X ago"
+  // Expose last refresh time so screens can show "updated X ago"
   DateTime? lastRefreshed;
 
   bool get isLoggedIn => session != null && _service != null;
@@ -30,7 +30,7 @@ class AppState extends ChangeNotifier {
     error = null;
     notifyListeners();
     try {
-      // FIX: trim trailing slash before storing
+      // Trim trailing slash before storing
       final url = serverUrl.trim().replaceAll(RegExp(r'/$'), '');
       final svc = TraccarService(serverUrl: url, email: email.trim(), password: password);
       final sess = await svc.login();
@@ -46,7 +46,7 @@ class AppState extends ChangeNotifier {
       await _loadInitialData();
       _service!.connectWebSocket();
     } catch (e) {
-      // FIX: strip verbose exception prefix
+      // Strip verbose exception prefix
       error = e.toString().replaceAll('Exception: ', '');
     }
     isLoading = false;
@@ -59,10 +59,22 @@ class AppState extends ChangeNotifier {
     final server = prefs.getString('server');
     final email  = prefs.getString('email');
     final pass   = prefs.getString('password');
+    
     if (server == null || email == null || pass == null) return false;
+    
     try {
-      final svc  = TraccarService(serverUrl: server, email: email, password: pass);
-      final sess = await svc.getSession();
+      final svc = TraccarService(serverUrl: server, email: email, password: pass);
+      
+      // Step 1: Attempt to recover session directly using stored cookies
+      TraccarSession? sess;
+      try {
+        sess = await svc.getSession();
+      } catch (_) {
+        // Step 2: Fallback if the cookie session has expired on the backend server.
+        // Re-authenticate explicitly using the stored credential pair.
+        sess = await svc.login();
+      }
+      
       _service = svc;
       session  = sess;
       _setupWsCallbacks();
@@ -71,6 +83,7 @@ class AppState extends ChangeNotifier {
       notifyListeners();
       return true;
     } catch (_) {
+      // If network is completely unreachable, fall back to manual login window gracefully
       return false;
     }
   }
@@ -104,13 +117,16 @@ class AppState extends ChangeNotifier {
       devices = results[0] as List<TraccarDevice>;
       final pos = results[1] as List<TraccarPosition>;
       final posMap = <int, TraccarPosition>{};
-      for (final p in pos) posMap[p.deviceId] = p;
+      for (final p in pos) {
+        posMap[p.deviceId] = p;
+      }
       positions = posMap;
 
-      // FIX: load today's events in parallel, don't block if fails
+      // Load today's events in parallel, don't block if fails
       if (devices.isNotEmpty) {
-        final now  = DateTime.now();
-        final from = DateTime(now.year, now.month, now.day);
+        final now  = DateTime.now().toUtc();
+        // FIX: Enforce standard UTC floor matching backend API parsing specs
+        final from = DateTime.utc(now.year, now.month, now.day, 0, 0, 0);
         try {
           final evs = await _service!.getEvents(
             from: from, to: now,
@@ -133,20 +149,26 @@ class AppState extends ChangeNotifier {
   void _setupWsCallbacks() {
     _service!.onDevicesUpdate = (updated) {
       final map = {for (var d in devices) d.id: d};
-      for (final d in updated) map[d.id] = d;
+      for (final d in updated) {
+        map[d.id] = d;
+      }
       devices = map.values.toList();
       lastRefreshed = DateTime.now();
       notifyListeners();
     };
     _service!.onPositionsUpdate = (updated) {
-      for (final p in updated) positions[p.deviceId] = p;
+      for (final p in updated) {
+        positions[p.deviceId] = p;
+      }
       lastRefreshed = DateTime.now();
       notifyListeners();
     };
     _service!.onEventsUpdate = (newEvents) {
-      // FIX: cap at 500, de-duplicate by id
+      // Cap at 500, de-duplicate by id
       final existing = {for (var e in events) e.id: e};
-      for (final e in newEvents) existing[e.id] = e;
+      for (final e in newEvents) {
+        existing[e.id] = e;
+      }
       final list = existing.values.toList()
         ..sort((a, b) {
           final ta = a.serverTime ?? DateTime(0);
@@ -160,6 +182,28 @@ class AppState extends ChangeNotifier {
       wsConnected = connected;
       notifyListeners();
     };
+  }
+
+  // ── Read state handlers ──
+  void markRead(int eventId) {
+    final index = events.indexWhere((e) => e.id == eventId);
+    if (index != -1) {
+      events[index].read = true;
+      notifyListeners();
+    }
+  }
+
+  void markAllRead() {
+    bool changed = false;
+    for (var event in events) {
+      if (!event.read) {
+        event.read = true;
+        changed = true;
+      }
+    }
+    if (changed) {
+      notifyListeners();
+    }
   }
 
   // ── Computed helpers ──
@@ -178,4 +222,7 @@ class AppState extends ChangeNotifier {
 
   int get criticalEventCount =>
       events.where((e) => ['alarm', 'deviceOffline'].contains(e.type)).length;
+
+  int get overspeedToday =>
+      events.where((e) => e.type == 'deviceOverspeed').length;
 }

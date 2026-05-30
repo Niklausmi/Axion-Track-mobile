@@ -8,7 +8,9 @@ import '../utils/theme.dart';
 import 'secondary_screens.dart';
 
 class DashboardScreen extends StatelessWidget {
-  const DashboardScreen({super.key});
+  final VoidCallback? onSeeAllAlerts;
+  final VoidCallback? onSeeMap;
+  const DashboardScreen({super.key, this.onSeeAllAlerts, this.onSeeMap});
 
   @override
   Widget build(BuildContext context) {
@@ -98,10 +100,7 @@ class DashboardScreen extends StatelessWidget {
               style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: AppColors.text1)),
             const Spacer(),
             GestureDetector(
-              onTap: () {
-                // Switch to map tab
-                final nav = context.findAncestorStateOfType<State>();
-              },
+              onTap: onSeeMap,
               child: const Text('See Map',
                 style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.primary)),
             ),
@@ -133,8 +132,10 @@ class DashboardScreen extends StatelessWidget {
             const Text("Today's Activity",
               style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: AppColors.text1)),
             const Spacer(),
-            const Text('See All',
-              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.primary)),
+            GestureDetector(
+              onTap: onSeeAllAlerts,
+              child: const Text('See All',
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.primary))),
           ]),
         )),
 
@@ -162,8 +163,10 @@ class DashboardScreen extends StatelessWidget {
             const Text('Recent Alerts',
               style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: AppColors.text1)),
             const Spacer(),
-            const Text('See All',
-              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.primary)),
+            GestureDetector(
+              onTap: onSeeAllAlerts,
+              child: const Text('See All',
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.primary))),
           ]),
         )),
 

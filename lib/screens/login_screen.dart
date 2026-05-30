@@ -1,4 +1,4 @@
-// lib/screens/login_screen.dart  — v2 (Hardcoded Server URL, shake on error)
+// lib/screens/login_screen.dart  — v3 (Light Mode + Sticky Auto-Login Routing)
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -12,11 +12,13 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin {
-  // Hardcoded to your custom endpoint behind the scenes
-  final _serverCtrl = TextEditingController(text: 'https://track.axiontrack.com');
-  final _emailCtrl  = TextEditingController(text: '');
-  final _passCtrl   = TextEditingController(text: '');
+  // Fix 8: hardcoded to Axion Track server — not user-editable
+  static const _serverUrl = 'https://track.axiontrack.com';
+  final _emailCtrl  = TextEditingController();
+  final _passCtrl   = TextEditingController();
   bool _obscure = true;
+  bool _checkingAutoLogin = true; // Block UI flash during persistent check
+
   late final AnimationController _shakeCtrl;
   late final Animation<double> _shake;
   late final AnimationController _logoCtrl;
@@ -25,31 +27,54 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
   @override
   void initState() {
     super.initState();
+    
+    // Shake animation configs
     _shakeCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 400));
     _shake = Tween<double>(begin: 0, end: 1).animate(
         CurvedAnimation(parent: _shakeCtrl, curve: Curves.elasticIn));
 
+    // Logo entrance configs
     _logoCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 700));
     _logoAnim = CurvedAnimation(parent: _logoCtrl, curve: Curves.easeOutBack);
     _logoCtrl.forward();
+
+    // Trigger explicit session lookup instantly upon widget initialization
+    _performSessionAutoCheck();
   }
 
   @override
   void dispose() {
-    _serverCtrl.dispose(); _emailCtrl.dispose(); _passCtrl.dispose();
+    _emailCtrl.dispose(); _passCtrl.dispose();
     _shakeCtrl.dispose(); _logoCtrl.dispose();
     super.dispose();
   }
 
+  // ── Session Auto Check Gate ──
+  Future<void> _performSessionAutoCheck() async {
+    final state = context.read<AppState>();
+    
+    // Attempt the persistent token lookup sequence
+    final success = await state.tryAutoLogin();
+    
+    if (!mounted) return;
+    
+    if (success && state.isLoggedIn) {
+      // Sticky session verified! Transition forward immediately
+      Navigator.pushReplacementNamed(context, '/home');
+    } else {
+      // No valid persistence profiles found; drop screen block and reveal form
+      setState(() => _checkingAutoLogin = false);
+    }
+  }
+
   Future<void> _login() async {
     FocusScope.of(context).unfocus();
-    // Simplified conditional checking since Server URL is guaranteed to be populated
     if (_emailCtrl.text.isEmpty || _passCtrl.text.isEmpty) {
       _shakeCtrl.forward(from: 0);
       return;
     }
     await context.read<AppState>().login(
-      serverUrl: _serverCtrl.text.trim(),
+      serverUrl: _serverUrl,
       email:     _emailCtrl.text.trim(),
       password:  _passCtrl.text,
     );
@@ -66,41 +91,56 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
   @override
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
+
+    // If looking up persistent storage states, show a clean, native light loader 
+    // to block the form from flashing on screen for authenticated users.
+    if (_checkingAutoLogin) {
+      return const Scaffold(
+        backgroundColor: Colors.white,
+        body: Center(
+          child: CircularProgressIndicator(
+            color: AppColors.primary,
+            strokeWidth: 3,
+          ),
+        ),
+      );
+    }
+
     return Scaffold(
       backgroundColor: AppColors.surface,
       body: SafeArea(child: Column(children: [
-        // Hero
+        // Hero Header Area
         Expanded(child: Container(
           width: double.infinity,
           decoration: const BoxDecoration(
-            gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight,
-              colors: [Color(0xFFEFF6FF), Color(0xFFFFFFFF)]),
+            gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter,
+              colors: [Color(0xFFF8FAFC), Color(0xFFFFFFFF)]),
           ),
           child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
             ScaleTransition(scale: _logoAnim, child: Container(
               width: 76, height: 76,
               decoration: BoxDecoration(
-                gradient: const LinearGradient(colors: [Color(0xFF1E40AF), Color(0xFF3B82F6)]),
+                gradient: const LinearGradient(colors: [Color(0xFF1A73E8), Color(0xFF0EA5E9)]),
                 borderRadius: BorderRadius.circular(22),
-                boxShadow: [BoxShadow(color: AppColors.primary.withValues(alpha: 0.35), blurRadius: 24, offset: const Offset(0, 10))],
+                boxShadow: [BoxShadow(color: AppColors.primary.withOpacity(0.2), blurRadius: 20, offset: const Offset(0, 8))],
               ),
               child: const Icon(Icons.satellite_alt_rounded, color: Colors.white, size: 40),
             )),
             const SizedBox(height: 20),
             RichText(text: const TextSpan(children: [
-              TextSpan(text: 'Axion',   style: TextStyle(fontSize: 34, fontWeight: FontWeight.w900, color: Color(0xFF0F172A), fontFamily: 'Inter')),
-              TextSpan(text: ' Track', style: TextStyle(fontSize: 34, fontWeight: FontWeight.w900, color: AppColors.primary, fontFamily: 'Inter')),
+              TextSpan(text: 'Axion',   style: TextStyle(fontSize: 32, fontWeight: FontWeight.w900, color: Color(0xFF0F172A), fontFamily: 'Inter')),
+              TextSpan(text: ' Track', style: TextStyle(fontSize: 32, fontWeight: FontWeight.w900, color: AppColors.primary, fontFamily: 'Inter')),
             ])),
             const SizedBox(height: 6),
             const Text('Professional Fleet Management',
-              style: TextStyle(fontSize: 14, color: AppColors.text3, fontWeight: FontWeight.w500)),
+              style: TextStyle(fontSize: 14, color: AppColors.text3, fontWeight: FontWeight.w600)),
             const SizedBox(height: 4),
             const Text('GPS · IoT · Real-time Analytics',
-              style: TextStyle(fontSize: 11, color: AppColors.text4, letterSpacing: 0.6)),
+              style: TextStyle(fontSize: 11, color: AppColors.text4, letterSpacing: 0.6, fontWeight: FontWeight.w500)),
           ]),
         )),
 
-        // Form with shake animation wrapper
+        // Input Console Area with Shaker Translation bindings
         AnimatedBuilder(
           animation: _shake,
           builder: (_, child) {
@@ -108,69 +148,76 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
             return Transform.translate(offset: Offset(offset, 0), child: child);
           },
           child: Container(
-            padding: const EdgeInsets.fromLTRB(24, 28, 24, 24),
-            decoration: const BoxDecoration(
+            padding: const EdgeInsets.fromLTRB(24, 28, 24, 32),
+            decoration: BoxDecoration(
               color: AppColors.surface,
-              boxShadow: [BoxShadow(color: Color(0x08000000), blurRadius: 20, offset: Offset(0, -4))],
+              boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 16, offset: const Offset(0, -4))],
+              border: const Border(top: BorderSide(color: AppColors.divider)),
             ),
             child: Column(children: [
-              // Error Banner Context Overlay
+              // Error Alert Notification Banner
               AnimatedSize(
                 duration: const Duration(milliseconds: 200),
                 child: state.error != null ? Container(
-                  margin: const EdgeInsets.only(bottom: 14),
+                  margin: const EdgeInsets.only(bottom: 16),
                   padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(color: const Color(0xFFFEF2F2), borderRadius: BorderRadius.circular(12)),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFEE2E2), 
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: AppColors.red.withOpacity(0.2)),
+                  ),
                   child: Row(children: [
-                    const Icon(Icons.error_outline, color: AppColors.red, size: 18),
+                    const Icon(Icons.error_outline_rounded, color: AppColors.red, size: 18),
                     const SizedBox(width: 8),
-                    Expanded(child: Text(state.error!, style: const TextStyle(fontSize: 13, color: AppColors.red))),
+                    Expanded(child: Text(state.error!, style: const TextStyle(fontSize: 13, color: AppColors.red, fontWeight: FontWeight.w600))),
                   ]),
                 ) : const SizedBox.shrink(),
               ),
 
-              // Server URL text field elements have been cleanly extracted from here
-              
-              _label('Email'),
-              TextField(controller: _emailCtrl, keyboardType: TextInputType.emailAddress,
-                decoration: const InputDecoration(hintText: 'admin@example.com',
-                  prefixIcon: Icon(Icons.email_outlined, color: AppColors.text3))),
-              const SizedBox(height: 12),
+              _label('Email Address'),
+              TextField(
+                controller: _emailCtrl, 
+                keyboardType: TextInputType.emailAddress,
+                textInputAction: TextInputAction.next,
+                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500),
+                decoration: const InputDecoration(
+                  hintText: 'name@company.com',
+                  prefixIcon: Icon(Icons.email_outlined, color: AppColors.text3, size: 20),
+                ),
+              ),
+              const SizedBox(height: 16),
 
               _label('Password'),
               TextField(
-                controller: _passCtrl, obscureText: _obscure,
+                controller: _passCtrl, 
+                obscureText: _obscure,
+                textInputAction: TextInputAction.done,
+                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500),
                 onSubmitted: (_) => _login(),
                 decoration: InputDecoration(
                   hintText: '••••••••',
-                  prefixIcon: const Icon(Icons.lock_outline, color: AppColors.text3),
+                  prefixIcon: const Icon(Icons.lock_outline_rounded, color: AppColors.text3, size: 20),
                   suffixIcon: IconButton(
-                    icon: Icon(_obscure ? Icons.visibility_outlined : Icons.visibility_off_outlined, color: AppColors.text3),
+                    icon: Icon(_obscure ? Icons.visibility_outlined : Icons.visibility_off_outlined, color: AppColors.text3, size: 20),
                     onPressed: () => setState(() => _obscure = !_obscure),
                   ),
                 ),
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 24),
 
-              SizedBox(width: double.infinity, child: ElevatedButton(
-                onPressed: state.isLoading ? null : _login,
-                child: state.isLoading
-                  ? const SizedBox(width: 22, height: 22,
-                      child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5))
-                  : const Text('Connect to Fleet →'),
-              )),
-              const SizedBox(height: 14),
-              
-              // Adjusted helper links targeting your secure platform setup directly
-              GestureDetector(
-                onTap: () {
-                  _emailCtrl.text  = 'demo@axiontrack.com';
-                  _passCtrl.text   = 'demo';
-                },
-                child: RichText(text: const TextSpan(children: [
-                  TextSpan(text: 'Need assistance? ', style: TextStyle(fontSize: 13, color: AppColors.text3, fontFamily: 'Inter')),
-                  TextSpan(text: 'Contact Support', style: TextStyle(fontSize: 13, color: AppColors.primary, fontWeight: FontWeight.w700, fontFamily: 'Inter')),
-                ])),
+              SizedBox(
+                width: double.infinity, 
+                child: ElevatedButton(
+                  onPressed: state.isLoading ? null : _login,
+                  style: ElevatedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  child: state.isLoading
+                    ? const SizedBox(width: 20, height: 20,
+                        child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5))
+                    : const Text('Sign In', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                ),
               ),
             ]),
           ),
@@ -182,6 +229,6 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
   Widget _label(String text) => Align(
     alignment: Alignment.centerLeft,
     child: Padding(padding: const EdgeInsets.only(bottom: 6),
-      child: Text(text, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700,
-        color: AppColors.text3, letterSpacing: 0.6))));
+      child: Text(text, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800,
+        color: AppColors.text2, letterSpacing: 0.6))));
 }

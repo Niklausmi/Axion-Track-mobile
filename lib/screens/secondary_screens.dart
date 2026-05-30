@@ -1,4 +1,4 @@
-// lib/screens/secondary_screens.dart — v3
+// lib/screens/secondary_screens.dart — v5 (Dark Mode Removed from Settings)
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -55,7 +55,6 @@ class _MapScreenState extends State<MapScreen> with AutomaticKeepAliveClientMixi
   Widget build(BuildContext context) {
     super.build(context);
     final state = context.watch<AppState>();
-    final devMap = {for (final d in state.devices) d.id: d};
 
     final searchFiltered = _query.isEmpty
         ? state.devices
@@ -77,7 +76,7 @@ class _MapScreenState extends State<MapScreen> with AutomaticKeepAliveClientMixi
         child: GestureDetector(
           onTap: () {
             setState(() => _selected = _selected?.id == d.id ? null : d);
-            if (_selected != null && p != null) {
+            if (_selected != null) {
               _mapCtrl.move(LatLng(p.latitude, p.longitude), 14);
             }
           },
@@ -486,9 +485,8 @@ class _AlertTab extends StatelessWidget {
             decoration: BoxDecoration(
               color: selected ? Colors.white.withOpacity(0.3) : AppColors.red,
               borderRadius: BorderRadius.circular(10)),
-            child: Text('$count', style: TextStyle(
-              fontSize: 10, fontWeight: FontWeight.w800,
-              color: selected ? Colors.white : Colors.white)),
+            child: Text('$count', style: const TextStyle(
+              fontSize: 10, fontWeight: FontWeight.w800, color: Colors.white)),
           ),
         ],
       ]),
@@ -511,6 +509,8 @@ class _AlertCard extends StatelessWidget {
     final lon  = event.attributes['longitude'] as num?;
     final spd  = event.attributes['speed']     as num?;
 
+    final actualTime = event.eventTime ?? event.serverTime;
+
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
@@ -529,17 +529,28 @@ class _AlertCard extends StatelessWidget {
             child: Icon(meta['icon'] as IconData, color: col, size: 22)),
           const SizedBox(width: 12),
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Row(children: [
-              Expanded(child: Text(meta['label'] as String,
-                style: TextStyle(fontSize: 13, fontWeight: isRead ? FontWeight.w600 : FontWeight.w800, color: AppColors.text1),
-                maxLines: 1, overflow: TextOverflow.ellipsis)),
-              Text(timeAgo(event.serverTime), style: const TextStyle(fontSize: 11, color: AppColors.text4)),
-              if (!isRead) ...[
-                const SizedBox(width: 6),
-                Container(width: 8, height: 8,
-                  decoration: BoxDecoration(color: AppColors.primary, shape: BoxShape.circle)),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Expanded(
+                  child: Text(meta['label'] as String,
+                    style: TextStyle(fontSize: 13, fontWeight: isRead ? FontWeight.w600 : FontWeight.w800, color: AppColors.text1),
+                    maxLines: 1, overflow: TextOverflow.ellipsis),
+                ),
+                const SizedBox(width: 8),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(timeAgo(actualTime), style: const TextStyle(fontSize: 11, color: AppColors.text4)),
+                    if (!isRead) ...[
+                      const SizedBox(width: 6),
+                      Container(width: 8, height: 8,
+                        decoration: const BoxDecoration(color: AppColors.primary, shape: BoxShape.circle)),
+                    ],
+                  ],
+                ),
               ],
-            ]),
+            ),
             const SizedBox(height: 3),
             Text(deviceName, style: const TextStyle(fontSize: 12, color: AppColors.text3)),
             if (lat != null && lon != null) Padding(
@@ -582,6 +593,8 @@ class AlertDetailScreen extends StatelessWidget {
     final lon   = (event.attributes['longitude'] as num?)?.toDouble();
     final spd   = (event.attributes['speed']     as num?)?.toDouble();
     final hasLoc = lat != null && lon != null;
+
+    final actualTime = event.eventTime ?? event.serverTime;
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -710,8 +723,8 @@ class AlertDetailScreen extends StatelessWidget {
               _DetailItem(Icons.label_outline_rounded, 'EVENT TYPE', meta['label'] as String),
               const Divider(height: 18, color: AppColors.divider),
               _DetailItem(Icons.access_time_rounded, 'OCCURRED AT',
-                event.serverTime != null
-                  ? '${_monthName(event.serverTime!.month)} ${event.serverTime!.day}, ${event.serverTime!.year} · ${fmtTimeOnly(event.serverTime)}'
+                actualTime != null
+                  ? '${_monthName(actualTime.month)} ${actualTime.day}, ${actualTime.year} · ${fmtTimeOnly(actualTime)}'
                   : '—'),
               const Divider(height: 18, color: AppColors.divider),
               _DetailItem(Icons.speed_rounded, 'SPEED',
@@ -766,7 +779,7 @@ class SettingsScreen extends StatelessWidget {
     final sess  = state.session;
 
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: SafeArea(child: ListView(children: [
         // Header
         Padding(
@@ -811,20 +824,22 @@ class SettingsScreen extends StatelessWidget {
           ]),
         ),
 
-        // Connection section
-        _SettingsSection(title: 'Connection', items: [
-          _SettingsRow(icon: Icons.dns_rounded, iconBg: const Color(0xFFDBEAFE), iconColor: AppColors.primary,
-            label: 'Server URL',
-            trailing: Flexible(child: Text(state.service?.serverUrl ?? '—',
-              style: const TextStyle(fontSize: 12, color: AppColors.text3),
-              overflow: TextOverflow.ellipsis, textAlign: TextAlign.right))),
+        _SettingsSection(title: 'Fleet', items: [
+          _SettingsRow(
+            icon: Icons.directions_car_rounded,
+            iconBg: const Color(0xFFDBEAFE),
+            iconColor: AppColors.primary,
+            label: 'Fleet Vehicles',
+            trailing: Text('${state.devices.length}',
+              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.text1))),
           _SettingsRow(
             icon: state.wsConnected ? Icons.wifi_rounded : Icons.wifi_off_rounded,
             iconBg: state.wsConnected ? const Color(0xFFDCFCE7) : const Color(0xFFFEE2E2),
             iconColor: state.wsConnected ? AppColors.green : AppColors.red,
             label: 'Live Connection',
             trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-              AnimatedContainer(duration: const Duration(milliseconds: 300),
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 300),
                 width: 8, height: 8,
                 decoration: BoxDecoration(
                   color: state.wsConnected ? AppColors.green : AppColors.red,
@@ -836,10 +851,6 @@ class SettingsScreen extends StatelessWidget {
                 style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600,
                   color: state.wsConnected ? AppColors.green : AppColors.red)),
             ])),
-          _SettingsRow(icon: Icons.directions_car_rounded, iconBg: const Color(0xFFDBEAFE), iconColor: AppColors.primary,
-            label: 'Fleet Vehicles',
-            trailing: Text('${state.devices.length}',
-              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.text1))),
         ]),
 
         // Account section
@@ -859,10 +870,33 @@ class SettingsScreen extends StatelessWidget {
           _SettingsRow(icon: Icons.info_outline_rounded, iconBg: const Color(0xFFDBEAFE), iconColor: AppColors.primary,
             label: 'Version',
             trailing: const Text('3.0.0', style: TextStyle(fontSize: 12, color: AppColors.text3))),
-          _SettingsRow(icon: Icons.satellite_alt_rounded, iconBg: const Color(0xFFF1F5F9), iconColor: AppColors.offline,
-            label: 'Powered by',
-            trailing: const Text('Traccar', style: TextStyle(fontSize: 12, color: AppColors.text3))),
         ]),
+
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+          child: Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Theme.of(context).cardColor,
+              borderRadius: BorderRadius.circular(18),
+              boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8)]),
+            child: Row(children: [
+              Container(width: 38, height: 38,
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(colors: [Color(0xFF1A73E8), Color(0xFF0EA5E9)]),
+                  borderRadius: BorderRadius.circular(12)),
+                child: const Icon(Icons.satellite_alt_rounded, color: Colors.white, size: 20)),
+              const SizedBox(width: 14),
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Text('Powered by',
+                  style: TextStyle(fontSize: 10, color: AppColors.text3, fontWeight: FontWeight.w500)),
+                const Text('Axion Track Tech',
+                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: AppColors.primary)),
+              ])),
+              const Text('© 2026', style: TextStyle(fontSize: 11, color: AppColors.text4)),
+            ]),
+          ),
+        ),
 
         // Sign out
         Padding(

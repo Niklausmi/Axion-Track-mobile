@@ -31,18 +31,29 @@ class _AlertsScreenState extends State<AlertsScreen> with SingleTickerProviderSt
   @override
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
-    final devMap = {for (final d in state.devices) d.id: d};
-
     final allEvents = state.events;
-    final unread = allEvents.where((e) => !e.read).toList();
-    final read = allEvents.where((e) => e.read).toList();
-    final current = _tab.index == 0 ? allEvents : _tab.index == 1 ? unread : read;
 
-    final filtered = current.where((e) {
+    // ── OPTIMIZATION: Count unread items efficiently without generating heavy duplicate arrays ──
+    final unreadCount = allEvents.where((e) => !e.read).length;
+
+    // ── OPTIMIZATION: Lazily evaluate the list subset based on the active tab context ──
+    Iterable<TraccarEvent> currentScope;
+    if (_tab.index == 1) {
+      currentScope = allEvents.where((e) => !e.read);
+    } else if (_tab.index == 2) {
+      currentScope = allEvents.where((e) => e.read);
+    } else {
+      currentScope = allEvents;
+    }
+
+    // Apply drop-down search filters to the selected scope
+    final filtered = currentScope.where((e) {
       if (_devFilter != null && e.deviceId != _devFilter) return false;
       if (_typeFilter != null && e.type != _typeFilter) return false;
       return true;
     }).toList();
+
+    final devMap = {for (final d in state.devices) d.id: d};
 
     return Column(
       children: [
@@ -92,7 +103,7 @@ class _AlertsScreenState extends State<AlertsScreen> with SingleTickerProviderSt
             labelStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, fontFamily: 'Inter'),
             tabs: [
               const Tab(text: 'All'),
-              Tab(text: unread.isEmpty ? 'Unread' : 'Unread  ${unread.length}'),
+              Tab(text: unreadCount == 0 ? 'Unread' : 'Unread  $unreadCount'),
               const Tab(text: 'Read'),
             ],
           ),
@@ -108,7 +119,7 @@ class _AlertsScreenState extends State<AlertsScreen> with SingleTickerProviderSt
               const SizedBox(width: 12),
               if (state.overspeedToday > 0) _SumChip('⚡ ${state.overspeedToday} Overspeed', AppColors.stopped),
               const Spacer(),
-              if (_tab.index == 0 && unread.isNotEmpty) GestureDetector(
+              if (_tab.index == 0 && unreadCount > 0) GestureDetector(
                 onTap: () { state.markAllRead(); },
                 child: const Row(
                   mainAxisSize: MainAxisSize.min, 
@@ -214,7 +225,7 @@ class _EventCard extends StatelessWidget {
         ),
         child: Row(
           children: [
-            // Left colour status line
+            // Left color status indicator line
             Container(
               width: 4, height: 74, 
               decoration: BoxDecoration(
@@ -235,21 +246,30 @@ class _EventCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start, 
                   children: [
+                    // ── FIX: Sub-Row isolates text items cleanly without boundary overflow anomalies ──
                     Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         Expanded(
                           child: Text(
                             m['label'] as String,
                             style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: AppColors.text1, fontFamily: 'Inter'),
+                            overflow: TextOverflow.ellipsis,
                           ),
                         ),
-                        Text(
-                          event.serverTime != null ? _timeStr(event.serverTime!) : '—',
-                          style: const TextStyle(fontSize: 11, color: AppColors.text3, fontFamily: 'Inter'),
-                        ),
-                        if (!event.read) Container(
-                          width: 8, height: 8, margin: const EdgeInsets.only(left: 6),
-                          decoration: const BoxDecoration(color: AppColors.primary, shape: BoxShape.circle),
+                        const SizedBox(width: 8),
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              event.serverTime != null ? _timeStr(event.serverTime!) : '—',
+                              style: const TextStyle(fontSize: 11, color: AppColors.text3, fontFamily: 'Inter'),
+                            ),
+                            if (!event.read) Container(
+                              width: 8, height: 8, margin: const EdgeInsets.only(left: 6),
+                              decoration: const BoxDecoration(color: AppColors.primary, shape: BoxShape.circle),
+                            ),
+                          ],
                         ),
                       ],
                     ),
@@ -280,7 +300,7 @@ class _EventCard extends StatelessWidget {
                 ),
               ),
             ),
-            const SizedBox(width: 8),
+            const SizedBox(width: 12),
           ],
         ),
       ),
@@ -356,7 +376,7 @@ class _PickerSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const dividerTrackColor = Color(0xFFE8EDF4); // Matching layout divider boundaries explicitly
+    const dividerTrackColor = Color(0xFFE8EDF4);
     return Column(
       mainAxisSize: MainAxisSize.min, 
       children: [
@@ -392,10 +412,11 @@ class _PickerSheet extends StatelessWidget {
                   ),
                 ),
               ),
-            )).toList(),
-          ),
+            ),
+          ).toList(),
         ),
-      ],
-    );
-  }
+      ),
+    ],
+  );
+}
 }

@@ -152,6 +152,9 @@ class TraccarEvent {
   final int? geofenceId;
   final Map<String, dynamic> attributes;
 
+  // ── FIX: Non-final boolean so AppState can modify state directly ──
+  bool read;
+
   TraccarEvent({
     required this.id,
     required this.deviceId,
@@ -160,6 +163,7 @@ class TraccarEvent {
     this.serverTime,
     this.geofenceId,
     required this.attributes,
+    this.read = false, // Defaults to false (unread) for incoming objects
   });
 
   factory TraccarEvent.fromJson(Map<String, dynamic> j) => TraccarEvent(
@@ -170,6 +174,8 @@ class TraccarEvent {
         serverTime: j['serverTime'] != null ? DateTime.tryParse(j['serverTime']) : null,
         geofenceId: j['geofenceId'],
         attributes: Map<String, dynamic>.from(j['attributes'] ?? {}),
+        // Fallback context validation check
+        read: j['read'] as bool? ?? false,
       );
 }
 

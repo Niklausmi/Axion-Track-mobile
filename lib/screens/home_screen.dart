@@ -20,6 +20,8 @@ class _HomeScreenState extends State<HomeScreen> {
   int _tab = 0;
   Timer? _autoRefresh;
 
+  void _switchTab(int index) => setState(() => _tab = index);
+
   @override
   void initState() {
     super.initState();
@@ -37,7 +39,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final unread = state.events.length;
 
     final pages = [
-      const DashboardScreen(),
+      DashboardScreen(onSeeAllAlerts: () => _switchTab(3), onSeeMap: () => _switchTab(2)),
       const VehiclesScreen(),
       const MapScreen(),
       const AlertsScreen(),
@@ -59,11 +61,13 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           child: SafeArea(
             child: SizedBox(height: 62, child: Row(children: [
-              _NavItem(icon: Icons.home_rounded,        label: 'Dashboard', selected: _tab == 0, onTap: () => setState(() => _tab = 0)),
-              _NavItem(icon: Icons.directions_car_rounded, label: 'Vehicles', selected: _tab == 1, onTap: () => setState(() => _tab = 1)),
-              _NavItem(icon: Icons.map_rounded,         label: 'Map',       selected: _tab == 2, onTap: () => setState(() => _tab = 2)),
-              _NavItem(icon: Icons.notifications_rounded, label: 'Alerts',  selected: _tab == 3, badge: unread > 0 ? (unread > 99 ? '99+' : '$unread') : null, onTap: () => setState(() => _tab = 3)),
-              _NavItem(icon: Icons.settings_rounded,    label: 'Settings',  selected: _tab == 4, onTap: () => setState(() => _tab = 4)),
+              _NavItem(icon: Icons.home_rounded,           label: 'Dashboard', selected: _tab == 0, onTap: () => _switchTab(0)),
+              _NavItem(icon: Icons.directions_car_rounded, label: 'Vehicles',  selected: _tab == 1, onTap: () => _switchTab(1)),
+              _NavItem(icon: Icons.map_rounded,            label: 'Map',       selected: _tab == 2, onTap: () => _switchTab(2)),
+              _NavItem(icon: Icons.notifications_rounded,  label: 'Alerts',    selected: _tab == 3,
+                badge: unread > 0 ? (unread > 99 ? '99+' : '$unread') : null,
+                onTap: () => _switchTab(3)),
+              _NavItem(icon: Icons.settings_rounded,       label: 'Settings',  selected: _tab == 4, onTap: () => _switchTab(4)),
             ])),
           ),
         ),
