@@ -48,6 +48,7 @@ class _AlertsScreenState extends State<AlertsScreen> with SingleTickerProviderSt
 
     // Apply drop-down search filters to the selected scope
     final filtered = currentScope.where((e) {
+      if (state.eventPrefs[e.type]?.showInApp == false) return false;
       if (_devFilter != null && e.deviceId != _devFilter) return false;
       if (_typeFilter != null && e.type != _typeFilter) return false;
       return true;

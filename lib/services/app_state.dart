@@ -1,4 +1,5 @@
 // lib/services/app_state.dart — v6 (Clean Light Mode Setup + Sticky Session Fix)
+import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/traccar_models.dart';
@@ -10,9 +11,12 @@ class AppState extends ChangeNotifier {
   List<TraccarDevice> devices = [];
   Map<int, TraccarPosition> positions = {};
   List<TraccarEvent> events = [];
+  Map<String, EventPref> eventPrefs = {};
   bool isLoading = false;
   bool wsConnected = false;
   String? error;
+
+  String? get serverUrl => _service?.serverUrl;
 
   // Expose last refresh time so screens can show "updated X ago"
   DateTime? lastRefreshed;
@@ -42,6 +46,7 @@ class AppState extends ChangeNotifier {
       await prefs.setString('email', email.trim());
       await prefs.setString('password', password);
 
+      await _loadEventPrefs();
       _setupWsCallbacks();
       await _loadInitialData();
       _service!.connectWebSocket();
@@ -77,6 +82,7 @@ class AppState extends ChangeNotifier {
       
       _service = svc;
       session  = sess;
+      await _loadEventPrefs();
       _setupWsCallbacks();
       await _loadInitialData();
       _service!.connectWebSocket();
@@ -144,6 +150,42 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> refresh() => _loadInitialData();
+
+  // ── Event Prefs ──
+  Future<void> _loadEventPrefs() async {
+    final prefs = await SharedPreferences.getInstance();
+    final String? prefsJson = prefs.getString('eventPrefs');
+    
+    // Initialize defaults from theme
+    final Map<String, dynamic> defaultMeta = {'deviceOverspeed': null, 'geofenceEnter': null, 'geofenceExit': null, 'ignitionOn': null, 'ignitionOff': null, 'deviceOnline': null, 'deviceOffline': null, 'alarm': null, 'deviceStopped': null, 'deviceMoving': null, 'deviceInactive': null, 'hardBraking': null, 'hardAcceleration': null, 'hardCornering': null, 'lowBattery': null, 'powerCut': null};
+    eventPrefs = {};
+    for (final key in defaultMeta.keys) {
+      eventPrefs[key] = EventPref();
+    }
+
+    if (prefsJson != null) {
+      try {
+        final decoded = jsonDecode(prefsJson) as Map<String, dynamic>;
+        for (final entry in decoded.entries) {
+          eventPrefs[entry.key] = EventPref.fromJson(entry.value);
+        }
+      } catch (_) {}
+    }
+    notifyListeners();
+  }
+
+  Future<void> setEventPref(String type, {bool? showInApp, bool? pushEnabled}) async {
+    if (!eventPrefs.containsKey(type)) {
+      eventPrefs[type] = EventPref();
+    }
+    if (showInApp != null) eventPrefs[type]!.showInApp = showInApp;
+    if (pushEnabled != null) eventPrefs[type]!.pushEnabled = pushEnabled;
+    notifyListeners();
+
+    final prefs = await SharedPreferences.getInstance();
+    final mapped = eventPrefs.map((key, value) => MapEntry(key, value.toJson()));
+    await prefs.setString('eventPrefs', jsonEncode(mapped));
+  }
 
   // ── WS callbacks ──
   void _setupWsCallbacks() {

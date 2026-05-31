@@ -318,3 +318,16 @@ String statusLabel(DeviceStatus s) {
     case DeviceStatus.expired: return 'Expired';
   }
 }
+
+class EventPref {
+  bool showInApp;
+  bool pushEnabled;
+
+  EventPref({this.showInApp = true, this.pushEnabled = true});
+
+  Map<String, dynamic> toJson() => {'showInApp': showInApp, 'pushEnabled': pushEnabled};
+  factory EventPref.fromJson(Map<String, dynamic> json) => EventPref(
+    showInApp: json['showInApp'] ?? true,
+    pushEnabled: json['pushEnabled'] ?? true,
+  );
+}

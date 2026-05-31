@@ -9,6 +9,7 @@ import '../models/traccar_models.dart';
 import '../utils/theme.dart';
 import 'live_tracking_screen.dart';
 import 'history_screen.dart';
+import 'settings_screen.dart';
 
 // ══════════════════════════════════════════════════════════════════════════
 // MAP SCREEN
@@ -380,9 +381,14 @@ class _AlertsScreenState extends State<AlertsScreen> with AutomaticKeepAliveClie
     final state  = context.watch<AppState>();
     final devMap = {for (final d in state.devices) d.id: d};
 
-    final unreadList = state.events.where((e) => !_readIds.contains(e.id)).toList();
-    final readList   = state.events.where((e) =>  _readIds.contains(e.id)).toList();
-    final allList    = state.events;
+    final filtered = state.events.where((e) {
+      final pref = state.eventPrefs[e.type];
+      return pref == null || pref.showInApp;
+    }).toList();
+
+    final unreadList = filtered.where((e) => !_readIds.contains(e.id)).toList();
+    final readList   = filtered.where((e) =>  _readIds.contains(e.id)).toList();
+    final allList    = filtered;
 
     final display = _tab == 0 ? allList : _tab == 1 ? unreadList : readList;
 
@@ -860,7 +866,9 @@ class SettingsScreen extends StatelessWidget {
             trailing: Text('#${sess?.id ?? "—"}',
               style: const TextStyle(fontSize: 12, color: AppColors.text3))),
           _SettingsRow(icon: Icons.notifications_rounded, iconBg: const Color(0xFFFEF3C7), iconColor: AppColors.orange,
-            label: 'Notifications', onTap: () {}),
+            label: 'Notifications', onTap: () {
+              Navigator.push(context, MaterialPageRoute(builder: (_) => const NotificationSettingsScreen()));
+            }),
           _SettingsRow(icon: Icons.security_rounded, iconBg: const Color(0xFFDCFCE7), iconColor: AppColors.green,
             label: 'Change Password', onTap: () {}),
         ]),
