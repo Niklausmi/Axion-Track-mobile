@@ -87,8 +87,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
       return;
     }
 
-    final from = DateTime.utc(_date.year, _date.month, _date.day, 0, 0, 0);
-    final to   = DateTime.utc(_date.year, _date.month, _date.day, 23, 59, 59, 999);
+    final from = DateTime(_date.year, _date.month, _date.day, 0, 0, 0);
+    final to   = DateTime(_date.year, _date.month, _date.day, 23, 59, 59, 999);
 
     try {
       final res = await Future.wait([

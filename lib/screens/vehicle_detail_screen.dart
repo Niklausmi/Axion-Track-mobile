@@ -135,9 +135,12 @@ class _VehicleDashTabState extends State<_VehicleDashTab> {
   Future<void> _loadTodayTrips() async {
     final svc = context.read<AppState>().service;
     if (svc == null) { setState(() => _tripsLoading = false); return; }
-    final now  = DateTime.now();
-    final from = DateTime(now.year, now.month, now.day);
-    final to   = DateTime(now.year, now.month, now.day, 23, 59, 59);
+    // Build today's range in UTC so it matches Traccar's server-side day boundary.
+    // Using local midnight then .toUtc() would shift to 19:00 UTC in PKT (UTC+5),
+    // pulling in the last 5 hours of yesterday.
+    final nowUtc = DateTime.now().toUtc();
+    final from   = DateTime.utc(nowUtc.year, nowUtc.month, nowUtc.day, 0, 0, 0);
+    final to     = nowUtc;
     try {
       final trips = await svc.getTrips(deviceId: widget.device.id, from: from, to: to);
       if (mounted) setState(() { _todayTrips = trips; _tripsLoading = false; });
@@ -157,7 +160,7 @@ class _VehicleDashTabState extends State<_VehicleDashTab> {
     final todayDur    = _todayTrips.fold(0,   (s, t) => s + t.duration);
     final todayMaxSpd = _todayTrips.fold(0.0, (m, t) => t.maxSpeedKmh > m ? t.maxSpeedKmh : m);
     final todayAvgSpd = _todayTrips.isEmpty ? 0.0
-        : _todayTrips.fold(0.0, (s, t) => s + t.averageSpeed * 3.6) / _todayTrips.length;
+        : _todayTrips.fold(0.0, (s, t) => s + t.averageSpeedKmh) / _todayTrips.length;
 
     final now = DateTime.now();
     final todayAlerts = state.events.where((e) {
@@ -759,7 +762,7 @@ class _VehicleAlertRow extends StatelessWidget {
     final lat   = (event.attributes['latitude']  as num?)?.toDouble();
     final lon   = (event.attributes['longitude'] as num?)?.toDouble();
     final spd   = event.attributes['speed'] != null
-      ? '${((event.attributes['speed'] as num) * 3.6).round()} km/h' : null;
+      ? '${((event.attributes['speed'] as num) * 1.852).round()} km/h' : null;
     final t        = (event.serverTime ?? event.eventTime)?.toLocal();
     final timeStr  = t != null ? fmtDateTime(t) : '—';
     final hasLoc   = lat != null && lon != null;
@@ -861,8 +864,8 @@ class _ReportsTab extends StatefulWidget {
   @override State<_ReportsTab> createState() => _ReportsTabState();
 }
 class _ReportsTabState extends State<_ReportsTab> {
-  DateTime _from = DateTime.now();
-  DateTime _to   = DateTime.now();
+  DateTime _from = DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day);
+  DateTime _to   = DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day, 23, 59, 59);
 
   static const _reports = [
     {'icon': Icons.directions_car_rounded, 'label': 'Vehicle Master', 'color': 0xFF7C3AED, 'bg': 0xFFF5F3FF},
@@ -884,10 +887,10 @@ class _ReportsTabState extends State<_ReportsTab> {
         const SizedBox(height: 10),
         SingleChildScrollView(scrollDirection: Axis.horizontal,
           child: Row(children: [
-            _QuickBtn('Today',     () => setState(() { _from = DateTime.now(); _to = DateTime.now(); })),
-            _QuickBtn('Yesterday', () { final y = DateTime.now().subtract(const Duration(days: 1)); setState(() { _from = y; _to = y; }); }),
-            _QuickBtn('This Week', () { final n = DateTime.now(); setState(() { _from = n.subtract(Duration(days: n.weekday-1)); _to = n; }); }),
-            _QuickBtn('Last Week', () { final n = DateTime.now(); final s = n.subtract(Duration(days: n.weekday+6)); setState(() { _from = s; _to = s.add(const Duration(days: 6)); }); }),
+            _QuickBtn('Today',     () { final n = DateTime.now(); setState(() { _from = DateTime(n.year, n.month, n.day); _to = DateTime(n.year, n.month, n.day, 23, 59, 59); }); }),
+            _QuickBtn('Yesterday', () { final y = DateTime.now().subtract(const Duration(days: 1)); setState(() { _from = DateTime(y.year, y.month, y.day); _to = DateTime(y.year, y.month, y.day, 23, 59, 59); }); }),
+            _QuickBtn('This Week', () { final n = DateTime.now(); final s = n.subtract(Duration(days: n.weekday - 1)); setState(() { _from = DateTime(s.year, s.month, s.day); _to = DateTime(n.year, n.month, n.day, 23, 59, 59); }); }),
+            _QuickBtn('Last Week', () { final n = DateTime.now(); final s = n.subtract(Duration(days: n.weekday + 6)); final e = s.add(const Duration(days: 6)); setState(() { _from = DateTime(s.year, s.month, s.day); _to = DateTime(e.year, e.month, e.day, 23, 59, 59); }); }),
           ]),
         ),
         const SizedBox(height: 14),

@@ -124,6 +124,11 @@ class AppState extends ChangeNotifier {
       final pos = results[1] as List<TraccarPosition>;
       final posMap = <int, TraccarPosition>{};
       for (final p in pos) {
+        // Retain previous ignition state if missing in new packet
+        final oldPos = positions[p.deviceId];
+        if (oldPos != null && p.ignition == null && oldPos.ignition != null) {
+          p.attributes['ignition'] = oldPos.ignition;
+        }
         posMap[p.deviceId] = p;
       }
       positions = posMap;
@@ -138,6 +143,11 @@ class AppState extends ChangeNotifier {
             from: from, to: now,
             deviceIds: devices.map((d) => d.id).toList(),
           );
+          evs.sort((a, b) {
+            final ta = a.serverTime ?? a.eventTime ?? DateTime(0);
+            final tb = b.serverTime ?? b.eventTime ?? DateTime(0);
+            return tb.compareTo(ta);
+          });
           events = evs;
         } catch (_) {}
       }
@@ -200,6 +210,11 @@ class AppState extends ChangeNotifier {
     };
     _service!.onPositionsUpdate = (updated) {
       for (final p in updated) {
+        // Retain previous ignition state if missing in new packet
+        final oldPos = positions[p.deviceId];
+        if (oldPos != null && p.ignition == null && oldPos.ignition != null) {
+          p.attributes['ignition'] = oldPos.ignition;
+        }
         positions[p.deviceId] = p;
       }
       lastRefreshed = DateTime.now();

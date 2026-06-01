@@ -111,8 +111,9 @@ class TraccarService {
     return (data as List).map((e) => TraccarDevice.fromJson(e)).toList();
   }
 
-  Future<List<TraccarPosition>> getPositions() async {
-    final data = await _request('GET', '/positions');
+  Future<List<TraccarPosition>> getPositions({int? id}) async {
+    final path = id != null ? '/positions?id=$id' : '/positions';
+    final data = await _request('GET', path);
     return (data as List).map((e) => TraccarPosition.fromJson(e)).toList();
   }
 
@@ -272,7 +273,7 @@ class TraccarService {
 
   void _startPolling() {
     _pollTimer?.cancel();
-    _pollTimer = Timer.periodic(const Duration(seconds: 15), (_) async {
+    _pollTimer = Timer.periodic(const Duration(seconds: 30), (_) async { // 30s not 15s — halves mobile data/battery drain
       if (_disposed) return;
       try {
         final devs = await getDevices();

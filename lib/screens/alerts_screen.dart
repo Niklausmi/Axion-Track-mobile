@@ -5,6 +5,8 @@ import '../services/app_state.dart';
 import '../models/traccar_models.dart';
 import '../utils/theme.dart';
 import '../widgets/shared_widgets.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart';
 
 class AlertsScreen extends StatefulWidget {
   const AlertsScreen({super.key});
@@ -152,7 +154,10 @@ class _AlertsScreenState extends State<AlertsScreen> with SingleTickerProviderSt
                     return _EventCard(
                       event: e, 
                       deviceName: dn,
-                      onTap: () { state.markRead(e.id); },
+                      onTap: () { 
+                        state.markRead(e.id); 
+                        _showEventDetails(context, e, dn);
+                      },
                     );
                   },
                 ),
@@ -292,7 +297,7 @@ class _EventCard extends StatelessWidget {
                         const Icon(Icons.speed_rounded, size: 11, color: AppColors.text4),
                         const SizedBox(width: 3),
                         Text(
-                          '${((event.attributes['speed'] as num?)?.toDouble() ?? 0) * 3.6 ~/ 1} km/h',
+                          '${((event.attributes['speed'] as num?)?.toDouble() ?? 0) * 1.852 ~/ 1} km/h',
                           style: const TextStyle(fontSize: 11, color: AppColors.text4, fontFamily: 'Inter'),
                         ),
                       ],
@@ -420,4 +425,171 @@ class _PickerSheet extends StatelessWidget {
     ],
   );
 }
+}
+
+void _showEventDetails(BuildContext context, TraccarEvent event, String deviceName) {
+  final m = eventMeta(event.type);
+  final col = Color(m['color'] as int);
+  final bg = Color(m['bg'] as int);
+  
+  final lat = (event.attributes['latitude'] as num?)?.toDouble();
+  final lon = (event.attributes['longitude'] as num?)?.toDouble();
+  final hasLoc = lat != null && lon != null;
+  final address = event.attributes['address'] as String? ?? 'Unknown Location';
+  final spd = event.attributes['speed'] != null ? '${((event.attributes['speed'] as num) * 1.852).round()} km/h' : '—';
+  
+  final t = (event.serverTime ?? event.eventTime)?.toLocal();
+  final timeStr = t != null ? fmtDateTime(t) : '—';
+
+  showModalBottomSheet(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: AppColors.surface,
+    shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+    builder: (ctx) => SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 20, 20, 30),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(children: [
+              Container(
+                width: 44, height: 44,
+                decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(14)),
+                child: Icon(m['icon'] as IconData, color: col, size: 22),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(m['label'] as String, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: AppColors.text1, fontFamily: 'Inter')),
+                  Text(timeStr, style: const TextStyle(fontSize: 12, color: AppColors.text3, fontFamily: 'Inter')),
+                ]),
+              ),
+              GestureDetector(
+                onTap: () => Navigator.pop(ctx),
+                child: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: const BoxDecoration(color: AppColors.background, shape: BoxShape.circle),
+                  child: const Icon(Icons.close_rounded, size: 18, color: AppColors.text2),
+                ),
+              ),
+            ]),
+            const SizedBox(height: 20),
+            
+            Row(children: [
+              Expanded(child: _DetailChip(icon: Icons.directions_car_rounded, label: 'Vehicle', value: deviceName)),
+              const SizedBox(width: 10),
+              Expanded(child: _DetailChip(icon: Icons.speed_rounded, label: 'Speed', value: spd)),
+            ]),
+            const SizedBox(height: 10),
+            _DetailChip(icon: Icons.location_on_rounded, label: 'Address', value: address, isFullWidth: true),
+            const SizedBox(height: 20),
+
+            if (hasLoc)
+              Container(
+                height: 200,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: AppColors.divider),
+                  boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 8)],
+                ),
+                clipBehavior: Clip.antiAlias,
+                child: FlutterMap(
+                  options: MapOptions(
+                    initialCenter: LatLng(lat, lon),
+                    initialZoom: 15,
+                  ),
+                  children: [
+                    TileLayer(
+                      urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                      userAgentPackageName: 'com.axiontrack.app',
+                    ),
+                    MarkerLayer(
+                      markers: [
+                        Marker(
+                          point: LatLng(lat, lon),
+                          width: 40, height: 40,
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: col.withOpacity(0.2),
+                              shape: BoxShape.circle,
+                            ),
+                            child: Center(
+                              child: Container(
+                                width: 14, height: 14,
+                                decoration: BoxDecoration(
+                                  color: col,
+                                  shape: BoxShape.circle,
+                                  border: Border.all(color: Colors.white, width: 2),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              )
+            else
+              Container(
+                height: 120,
+                width: double.infinity,
+                decoration: BoxDecoration(
+                  color: AppColors.background,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: AppColors.divider),
+                ),
+                child: const Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.location_off_rounded, size: 28, color: AppColors.text4),
+                    SizedBox(height: 8),
+                    Text('Location data not available', style: TextStyle(fontSize: 13, color: AppColors.text3, fontFamily: 'Inter')),
+                  ],
+                ),
+              ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+class _DetailChip extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String value;
+  final bool isFullWidth;
+  const _DetailChip({required this.icon, required this.label, required this.value, this.isFullWidth = false});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.background,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.divider),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 16, color: AppColors.text3),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label, style: const TextStyle(fontSize: 11, color: AppColors.text4, fontWeight: FontWeight.w600, fontFamily: 'Inter')),
+                const SizedBox(height: 2),
+                Text(value, style: const TextStyle(fontSize: 13, color: AppColors.text1, fontWeight: FontWeight.w700, fontFamily: 'Inter')),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }

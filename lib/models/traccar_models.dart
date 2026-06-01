@@ -91,7 +91,7 @@ class TraccarPosition {
   final double latitude;
   final double longitude;
   final double altitude;
-  final double speed; // m/s
+  final double speed; // knots (Traccar REST API always sends speed in knots)
   final double course;
   final String? address;
   final bool valid;
@@ -112,7 +112,9 @@ class TraccarPosition {
     required this.attributes,
   });
 
-  double get speedKmh => speed * 3.6;
+  // Traccar sends speed in knots — multiply by 1.852 to get km/h
+  // (NOT * 3.6 — that would be the m/s → km/h factor, which is wrong here)
+  double get speedKmh => speed * 1.852;
 
   bool? get ignition => attributes['ignition'] as bool?;
   double? get fuel => (attributes['fuel'] as num?)?.toDouble();
@@ -150,6 +152,7 @@ class TraccarEvent {
   final DateTime? eventTime;
   final DateTime? serverTime;
   final int? geofenceId;
+  final int? positionId;
   final Map<String, dynamic> attributes;
 
   // ── FIX: Non-final boolean so AppState can modify state directly ──
@@ -162,6 +165,7 @@ class TraccarEvent {
     this.eventTime,
     this.serverTime,
     this.geofenceId,
+    this.positionId,
     required this.attributes,
     this.read = false, // Defaults to false (unread) for incoming objects
   });
@@ -173,6 +177,7 @@ class TraccarEvent {
         eventTime: j['eventTime'] != null ? DateTime.tryParse(j['eventTime']) : null,
         serverTime: j['serverTime'] != null ? DateTime.tryParse(j['serverTime']) : null,
         geofenceId: j['geofenceId'],
+        positionId: j['positionId'],
         attributes: Map<String, dynamic>.from(j['attributes'] ?? {}),
         // Fallback context validation check
         read: j['read'] as bool? ?? false,
@@ -184,8 +189,8 @@ class TraccarTrip {
   final DateTime? startTime;
   final DateTime? endTime;
   final double distance; // meters
-  final double maxSpeed; // m/s
-  final double averageSpeed; // m/s
+  final double maxSpeed;     // knots (Traccar Reports API sends knots)
+  final double averageSpeed; // knots (Traccar Reports API sends knots)
   final int duration; // ms
   final String? startAddress;
   final String? endAddress;
@@ -211,7 +216,9 @@ class TraccarTrip {
   });
 
   double get distanceKm => distance / 1000;
-  double get maxSpeedKmh => maxSpeed * 3.6;
+  // Traccar sends trip speeds in knots — multiply by 1.852 to get km/h
+  double get maxSpeedKmh     => maxSpeed     * 1.852;
+  double get averageSpeedKmh => averageSpeed * 1.852;
   String get durationStr {
     final s = duration ~/ 1000;
     final h = s ~/ 3600;
@@ -299,13 +306,27 @@ class TraccarGeofence {
 enum DeviceStatus { running, stopped, idle, offline, nodata, expired }
 
 DeviceStatus computeStatus(TraccarDevice device, TraccarPosition? pos) {
-  if (device.status == 'offline') return DeviceStatus.offline;
-  if (device.status == 'online') {
-    if (pos != null && pos.speedKmh > 2) return DeviceStatus.running;
-    return DeviceStatus.stopped;
-  }
-  if (device.status == 'unknown') return DeviceStatus.nodata;
-  return DeviceStatus.offline;
+  // Check if we have a recent position (within 10 minutes).
+  // Traccar's device.status='offline' lags behind real position data — its
+  // server-side timeout can mark a device offline even when we received a
+  // packet seconds ago. If position is fresh, never trust the offline status.
+  final posTimestamp = pos?.serverTime ?? pos?.fixTime;
+  final hasRecentPos = posTimestamp != null &&
+      DateTime.now().difference(posTimestamp.toLocal()).inMinutes < 10;
+
+  // Unknown/no-data: no recent position AND Traccar says unknown
+  if (device.status == 'unknown' && !hasRecentPos) return DeviceStatus.nodata;
+
+  // Offline: no recent position AND Traccar confirms offline
+  if (device.status == 'offline' && !hasRecentPos) return DeviceStatus.offline;
+
+  // Device is online (or has a recent position — override stale offline status)
+  if (pos == null) return DeviceStatus.stopped;
+
+  if (pos.speedKmh > 2)        return DeviceStatus.running;
+  if (pos.ignition == true)    return DeviceStatus.idle;    // engine on, not moving
+  if (pos.ignition == false)   return DeviceStatus.stopped; // engine off
+  return DeviceStatus.stopped; // no ignition data — default to stopped
 }
 
 String statusLabel(DeviceStatus s) {

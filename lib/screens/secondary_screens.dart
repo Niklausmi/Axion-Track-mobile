@@ -570,7 +570,7 @@ class _AlertCard extends StatelessWidget {
                   const SizedBox(width: 10),
                   const Icon(Icons.speed_rounded, size: 12, color: AppColors.text4),
                   const SizedBox(width: 4),
-                  Text('${(spd * 3.6).round()} km/h',
+                  Text('${(spd * 1.852).round()} km/h',
                     style: const TextStyle(fontSize: 11, color: AppColors.text4)),
                 ],
               ]),
@@ -592,9 +592,14 @@ class AlertDetailScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final state = context.watch<AppState>();
+    final latestPos = state.posFor(event.deviceId);
+
     final meta  = eventMeta(event.type);
     final col   = Color(meta['color'] as int);
     final bg    = Color(meta['bg']    as int);
+    
+    // Try to get coordinates strictly from event attributes
     final lat   = (event.attributes['latitude']  as num?)?.toDouble();
     final lon   = (event.attributes['longitude'] as num?)?.toDouble();
     final spd   = (event.attributes['speed']     as num?)?.toDouble();
@@ -714,6 +719,22 @@ class AlertDetailScreen extends StatelessWidget {
                 ),
               )),
             ]),
+          ) else Container(
+            height: 120,
+            width: double.infinity,
+            decoration: BoxDecoration(
+              color: AppColors.background,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: AppColors.divider),
+            ),
+            child: const Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.location_off_rounded, size: 28, color: AppColors.text4),
+                SizedBox(height: 8),
+                Text('Location for event not available', style: TextStyle(fontSize: 13, color: AppColors.text3, fontFamily: 'Inter')),
+              ],
+            ),
           ),
           const SizedBox(height: 14),
 
@@ -734,7 +755,7 @@ class AlertDetailScreen extends StatelessWidget {
                   : '—'),
               const Divider(height: 18, color: AppColors.divider),
               _DetailItem(Icons.speed_rounded, 'SPEED',
-                spd != null ? '${(spd * 3.6).round()} km/h' : '0 km/h'),
+                spd != null ? '${(spd * 1.852).round()} km/h' : '0 km/h'),
               if (hasLoc) ...[
                 const Divider(height: 18, color: AppColors.divider),
                 _DetailItem(Icons.location_on_outlined, 'COORDINATES',
