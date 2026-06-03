@@ -135,12 +135,11 @@ class _VehicleDashTabState extends State<_VehicleDashTab> {
   Future<void> _loadTodayTrips() async {
     final svc = context.read<AppState>().service;
     if (svc == null) { setState(() => _tripsLoading = false); return; }
-    // Build today's range in UTC so it matches Traccar's server-side day boundary.
-    // Using local midnight then .toUtc() would shift to 19:00 UTC in PKT (UTC+5),
-    // pulling in the last 5 hours of yesterday.
-    final nowUtc = DateTime.now().toUtc();
-    final from   = DateTime.utc(nowUtc.year, nowUtc.month, nowUtc.day, 0, 0, 0);
-    final to     = nowUtc;
+    // Use local time so it matches the user's local "today".
+    // traccar_service.dart will convert these local DateTimes to UTC for the API.
+    final now = DateTime.now();
+    final from = DateTime(now.year, now.month, now.day);
+    final to = now;
     try {
       final trips = await svc.getTrips(deviceId: widget.device.id, from: from, to: to);
       if (mounted) setState(() { _todayTrips = trips; _tripsLoading = false; });

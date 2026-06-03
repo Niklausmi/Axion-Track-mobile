@@ -105,6 +105,23 @@ class TraccarService {
 
   Future<void> logout() async => _request('DELETE', '/session');
 
+  Future<bool> updateNotificationToken(int userId, String token) async {
+    try {
+      final userRes = await _request('GET', '/users/$userId');
+      if (userRes != null) {
+        final Map<String, dynamic> user = Map<String, dynamic>.from(userRes);
+        final attributes = Map<String, dynamic>.from(user['attributes'] ?? {});
+        // Traccar commonly expects the token in attributes.notificationTokens
+        attributes['notificationTokens'] = token;
+        user['attributes'] = attributes;
+        
+        await _request('PUT', '/users/$userId', body: user);
+        return true;
+      }
+    } catch (_) {}
+    return false;
+  }
+
   // ── Data ──
   Future<List<TraccarDevice>> getDevices() async {
     final data = await _request('GET', '/devices');

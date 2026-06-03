@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/traccar_models.dart';
 import 'traccar_service.dart';
+import 'push_notification_service.dart';
 
 class AppState extends ChangeNotifier {
   TraccarService? _service;
@@ -49,6 +50,7 @@ class AppState extends ChangeNotifier {
       await _loadEventPrefs();
       _setupWsCallbacks();
       await _loadInitialData();
+      await _setupPushNotifications();
       _service!.connectWebSocket();
     } catch (e) {
       // Strip verbose exception prefix
@@ -85,12 +87,24 @@ class AppState extends ChangeNotifier {
       await _loadEventPrefs();
       _setupWsCallbacks();
       await _loadInitialData();
+      await _setupPushNotifications();
       _service!.connectWebSocket();
       notifyListeners();
       return true;
     } catch (_) {
       // If network is completely unreachable, fall back to manual login window gracefully
       return false;
+    }
+  }
+
+  Future<void> _setupPushNotifications() async {
+    if (_service != null && session != null) {
+      final pushService = PushNotificationService();
+      await pushService.initialize();
+      final token = await pushService.getToken();
+      if (token != null) {
+        await _service!.updateNotificationToken(session!.id, token);
+      }
     }
   }
 
@@ -135,9 +149,8 @@ class AppState extends ChangeNotifier {
 
       // Load today's events in parallel, don't block if fails
       if (devices.isNotEmpty) {
-        final now  = DateTime.now().toUtc();
-        // FIX: Enforce standard UTC floor matching backend API parsing specs
-        final from = DateTime.utc(now.year, now.month, now.day, 0, 0, 0);
+        final now = DateTime.now();
+        final from = DateTime(now.year, now.month, now.day);
         try {
           final evs = await _service!.getEvents(
             from: from, to: now,

@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "553634347311",
+    "project_id": "fleetos-push",
+    "storage_bucket": "fleetos-push.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:553634347311:android:51ac4cc9b26a718b2789da",
+        "android_client_info": {
+          "package_name": "com.example.axion_track"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBxWEIm3U6rZ9Jcjp9kjZBrU1XHIbkLfuE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

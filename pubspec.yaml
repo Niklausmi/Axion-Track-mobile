@@ -26,6 +26,8 @@ dependencies:
   cupertino_icons: ^1.0.8
   url_launcher: ^6.3.1
   flutter_launcher_icons: ^0.14.4
+  firebase_core: ^4.10.0
+  firebase_messaging: ^16.3.0
 
 dev_dependencies:
   flutter_test:
